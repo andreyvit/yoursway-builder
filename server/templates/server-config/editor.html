@@ -1,0 +1,13 @@
+{% extends "../layout.html" %}
+{% block title %}AppHome Installation{% endblock %}
+
+{% block content %}
+<h1>Server configuration</h1>
+<form action="/server-config" method="post">
+  <div>YourSway Builder server name: <input type="text" name="server_name" value="{{ config.server_name }}"></div>
+  <div><input type="submit" value="Save Configuration"></div>
+  {% if config.is_saved %}
+    <div><input type="submit" name="delete" value="Remove Configuration"></div>
+  {% endif %}
+</form>
+{% endblock %}

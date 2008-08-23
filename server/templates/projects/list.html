@@ -1,0 +1,14 @@
+{% extends "../layout.html" %}
+
+{% block title %}Projects{% endblock %}
+
+{% block content %}
+<h1>Projects</h1>       
+                
+{% for project in projects %}
+  <p><b>{{ project.name }}</b> (created by {{ project.owner }})</p>
+{% endfor %}
+
+<p><a class="nav" href="/projects/create">Create project</a></p>
+
+{% endblock %}

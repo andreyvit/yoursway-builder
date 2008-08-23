@@ -1,0 +1,32 @@
+<html>
+	<head>		
+		<meta content="text/html; charset=UTF-8" http-equiv="Content-Type"/>			
+		<link rel="stylesheet" type="text/css" media="screen,print" href="/media/style.css" />
+		<title>{% block title %}(no title!!!!){% endblock %}</title>
+		<style>
+body { font: 10pt Verdana; }
+p { margin-top: 10px; margin-bottom: 0px; }
+a.nav, a.nav:visited { color: blue; }
+.error { color: red; font-size: smaller; }
+#footer { margin-top: 15px; font-size: smaller; }
+		</style>
+	</head>
+	<body>
+    
+    {% if user %}
+      <p>You are signed in as {{ user }} — <a class="nav" href="{{ logout_url }}">sign out</a>.</p>
+      {% if user_is_server_admin %}
+        <p><a class="nav" href="/server-config">Server config</a></p>
+      {% endif %}
+    {% else %}
+      <p>You are not signed in — <a class="nav" href="{{ login_url }}">sign in</a>.</p>
+    {% endif %}
+    
+    <div id="content">
+      {% block content %}{% endblock %}
+    </div>
+		<div id="footer">
+			 &copy; 2008 YourSway LLC
+		</div>
+	</body>	
+</html>
