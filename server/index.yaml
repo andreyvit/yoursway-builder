@@ -11,3 +11,7 @@ indexes:
 # your application using appcfg.py.
 
 # Used once in query history.
+- kind: Greeting
+  properties:
+  - name: date
+    direction: desc

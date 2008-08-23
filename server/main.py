@@ -62,6 +62,9 @@ class Project(db.Model):
     if len(self.name) == 0:
       errors.update(name = "project name is required")
     return errors
+    
+  def urlname(self):
+    return "%s" % (self.key(),)
 
 class Greeting(db.Model):
   author = db.UserProperty()
@@ -131,6 +134,13 @@ class CreateProjectHandler(BaseHandler):
     self.data.update(errors = errors, project = project)
     self.render('projects', 'editor.html')
 
+class ProjectHandler(BaseHandler):
+  @prepare_stuff
+  def get(self, project_key):
+    project = Project.get(project_key)
+    self.data.update(project = project)
+    self.render('project', 'index.html')
+
 class ServerConfigHandler(BaseHandler):
   @must_be_admin
   def get(self):
@@ -174,6 +184,7 @@ url_mapping = [
   ('/', IndexHandler),
   ('/projects', ProjectsHandler),
   ('/projects/create', CreateProjectHandler),
+  ('/projects/([^/]*)', ProjectHandler),
   ('/server-config', ServerConfigHandler),
   ('/server-admin-required', ServerAdminRequiredHandler)
 ]
