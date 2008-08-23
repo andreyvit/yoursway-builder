@@ -156,6 +156,22 @@ class EditProjectHandler(BaseHandler):
     self.data.update(errors = errors, edit = True, project = project)
     self.render('project', 'editor.html')
 
+class DeleteProjectHandler(BaseHandler):
+  @prepare_stuff
+  def post(self, project_key):
+    project = Project.get(project_key)
+    confirm = self.request.get('confirm')
+    if confirm != '1':
+      self.redirect('/projects/%s/edit' % project.urlname())
+      return
+
+    project.delete()
+    self.redirect('/projects')
+
+  def render_editor(self, project, errors = dict()):
+    self.data.update(errors = errors, edit = True, project = project)
+    self.render('project', 'editor.html')
+
 class ProjectHandler(BaseHandler):
   @prepare_stuff
   def get(self, project_key):
@@ -208,6 +224,7 @@ url_mapping = [
   ('/projects/create', CreateProjectHandler),
   ('/projects/([^/]*)', ProjectHandler),
   ('/projects/([^/]*)/edit', EditProjectHandler),
+  ('/projects/([^/]*)/delete', DeleteProjectHandler),
   ('/server-config', ServerConfigHandler),
   ('/server-admin-required', ServerAdminRequiredHandler)
 ]

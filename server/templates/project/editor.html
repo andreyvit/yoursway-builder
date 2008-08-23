@@ -20,4 +20,12 @@
 {% endif %}
 </form>
 
+{% if edit %}
+<hr>
+<h2>Delete project?</h2>
+<form action="/projects/{{ project.urlname }}/delete" method="post">
+<p><input type="checkbox" id="confirm_deletion" name="confirm" value="1"><label for="confirm_deletion"> I understand this is irreversible</label></p>
+<p><input type="submit" value="Delete this project"></p>
+</form>
+{% endif %}
 {% endblock %}
