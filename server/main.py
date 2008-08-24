@@ -99,8 +99,14 @@ class Builder(db.Model):
   def is_online(self):
     return self._since_last_check < self._config.builder_offline_after
     
+class Build(db.Model):
+  project = db.ReferenceProperty(Project, collection_name = 'builds')
+  version = db.TextProperty()
+  created_at = db.DateTimeProperty(auto_now_add = True)
+    
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
+  build = db.ReferenceProperty(Build, collection_name = 'messages')
   created_at = db.DateTimeProperty(auto_now_add = True)
   body = db.TextProperty()
   state = db.IntegerProperty(default = 0)
@@ -217,16 +223,21 @@ class ProjectHandler(BaseHandler):
   @prepare_stuff
   def get(self, project_key):
     project = Project.get(project_key)
+    
     builders = self.fetch_active_builders()
     for builder in builders:
       builder.bind_environment(self.config, self.now)
     online_builders = [b for b in builders if b.is_online()]
     recent_builders = [b for b in builders if not b.is_online()]
+    
+    builds = project.builds.order('-created_at').fetch(10)
+    
     self.data.update(
       project = project,
       online_builders = online_builders,
       recent_builders = recent_builders,
       builders = online_builders + recent_builders,
+      builds = builds,
     )
     self.render('project', 'index.html')
 
@@ -244,10 +255,13 @@ class BuildProjectHandler(BaseHandler):
       logging.warning("BuildProjectHandler: version is not specified")
       self.error(500)
       return
+      
+    build = Build(project = project, version = version)
+    build.put()
 
     body = "SET\tver\t%s\n%s" % (version, project.script)
     
-    message = Message(builder = builder, body = body)
+    message = Message(builder = builder, build = build, body = body)
     message.put()
     
     self.redirect('/projects/%s' % project.urlname())

@@ -38,5 +38,13 @@
 	{% endfor %}
 {% endif %}
 
+<h2>Last 10 builds</h2>
+{% if not builds %}
+<p>No builds yet — hit Build to make the first one!</p>
+{% endif %}
+{% for build in builds %}
+<h3>{{ build.version }}</h3>
+<p>Build started at {{ build.created_at }}.</p>
+{% endfor %}
 
 {% endblock %}
