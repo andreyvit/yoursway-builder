@@ -10,7 +10,7 @@
 
 <h2>New build?</h2>
 <form action="/projects/{{ project.urlname }}/build" method="post">
-<p><label for="version">Version: </label><input type="text" id="version" name="version" value="0.0.1"></p>
+<p><label for="version">Version: </label><input type="text" id="version" name="version" value="{{ next_version }}"></p>
 <p><label for="builder">Builder: </label>
 	<select type="text" id="builder" name="builder" value="">
 		{% for builder in builders %}

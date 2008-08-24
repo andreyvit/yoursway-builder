@@ -231,6 +231,13 @@ class ProjectHandler(BaseHandler):
     recent_builders = [b for b in builders if not b.is_online()]
     
     builds = project.builds.order('-created_at').fetch(10)
+
+    # calculate next version
+    next_version = '0.0.1'
+    if len(builds) > 0:
+      v = builds[0].version.split('.')
+      v[-1] = str(int(v[-1]) + 1)
+      next_version = ".".join(v)
     
     self.data.update(
       project = project,
@@ -238,6 +245,7 @@ class ProjectHandler(BaseHandler):
       recent_builders = recent_builders,
       builders = online_builders + recent_builders,
       builds = builds,
+      next_version = next_version,
     )
     self.render('project', 'index.html')
 
