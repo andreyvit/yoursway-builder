@@ -175,7 +175,7 @@ class EditProjectHandler(BaseHandler):
     errors = project.validate()
     if len(errors) == 0:
       project.put()
-      self.redirect('/')
+      self.redirect('/projects/%s' % project.urlname())
     else:       
       self.render_editor(project, errors)          
 
