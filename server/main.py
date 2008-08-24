@@ -138,7 +138,7 @@ class BaseHandler(webapp.RequestHandler):
   def fetch_active_builders(self):
     result = Builder.all().filter('last_check_at > ', (self.now - timedelta(seconds=self.config.builder_is_recent_within))).fetch(20)
     for builder in result:
-      count = builder.messages.count(limit = 10)
+      count = builder.messages.filter('state =', 0).count(limit = 10)
       logging.info("count for builder %s: %d" % (builder.name, count))
       builder.set_message_count(count)
     return result
@@ -252,13 +252,12 @@ class BuildProjectHandler(BaseHandler):
     
     self.redirect('/projects/%s' % project.urlname())
 
-class ObtainWorkHandler(BaseHandler):
+class BuilderObtainWorkHandler(BaseHandler):
   def get(self):
     self.post()
     
   @prepare_stuff
-  def post(self):
-    name = self.request.get('name')
+  def post(self, name):
     if name == None or len(name) == 0:
       self.error(501)
       return
@@ -266,15 +265,48 @@ class ObtainWorkHandler(BaseHandler):
     if builder == None:
       builder = Builder(name = name)
     builder.last_check_at = datetime.now()
-    builder.put()
-    message = builder.messages.order('created_at').get()
+
+    stale_messages = builder.messages.filter('state =', 1).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
+    for message in stale_messages:
+      message.state = 3
+      message.put()
+    
+    message = builder.messages.filter('state =', 0).order('created_at').get()
     if message == None:
       self.response.out.write("IDLE\tv1\t%d" % self.config.builder_poll_interval)
+      builder.busy = False
     else:
       message.state = 1
       message.put()
+      builder.busy = True
       body = "ENVELOPE\tv1\t%s\n%s" % (message.key(), message.body)
       self.response.out.write(body)
+      
+    builder.put()
+
+class BuilderMessageDoneHandler(BaseHandler):
+  @prepare_stuff
+  def post(self, name, message_key):
+    builder = Builder.all().filter('name = ', name).get()
+    if builder == None:
+      self.error(404)
+      return
+
+    builder.last_check_at = datetime.now()
+    builder.put()
+    
+    message = Message.get(message_key)
+    if message == None:
+      logging.warning("BuilderMessageDoneHandler: no message found with key %s" % message_key)
+      self.error(500)
+      return
+    if message.builder.key() != builder.key():
+      logging.warning("BuilderMessageDoneHandler: wrong builder - %s instead of %s" % (message.builder.key(), builder.key()))
+      self.error(500)
+      return
+
+    message.state = 2
+    message.put()
 
 class ServerConfigHandler(BaseHandler):
   @must_be_admin
@@ -327,7 +359,8 @@ url_mapping = [
   ('/projects/([^/]*)/delete', DeleteProjectHandler),
   ('/projects/([^/]*)/build', BuildProjectHandler),
   
-  ('/builders/obtain-work', ObtainWorkHandler),
+  ('/builders/([^/]*)/obtain-work', BuilderObtainWorkHandler),
+  ('/builders/([^/]*)/messages/([^/]*)/done', BuilderMessageDoneHandler),
   ('/server-config', ServerConfigHandler),
   ('/server-admin-required', ServerAdminRequiredHandler)
 ]

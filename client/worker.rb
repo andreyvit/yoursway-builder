@@ -29,7 +29,7 @@ config.poll_interval = 59
 interrupted = false
 trap("INT") { interrupted = true }
 
-uri = URI.parse("http://#{config.server_host}/builders/obtain-work")
+obtain_work_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/obtain-work")
 
 def log message
   puts message
@@ -41,9 +41,7 @@ def invoke cmd, *args
 end
 
 while not interrupted
-  res = Net::HTTP.post_form(uri, {
-      'name' => config.builder_name,
-    })
+  res = Net::HTTP.post_form(obtain_work_uri, {'token' => 42})
   wait_before_polling = true
   if res.code.to_i != 200
     log "Error response: code #{res.code}"
@@ -60,7 +58,7 @@ while not interrupted
       if proto_ver == 'v1'
         if command == 'IDLE'
           new_interval = [60*20, args[1].to_i].min
-          if new_interval >= 30 && config.poll_interval != new_interval
+          if new_interval >= 10 && config.poll_interval != new_interval
             config.poll_interval = new_interval
             log "Poll interval set to #{config.poll_interval}"
           end
@@ -83,6 +81,10 @@ while not interrupted
         end
       end
       
+      if message_id
+        message_done_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/messages/%s/done" % message_id)
+        res = Net::HTTP.post_form(message_done_uri, {'token' => 42})
+      end
     end
   end
   
