@@ -35,6 +35,11 @@ def log message
   puts message
 end
 
+def invoke cmd, *args
+  args = [''] if args.empty?
+  system(cmd, *args)
+end
+
 while not interrupted
   res = Net::HTTP.post_form(uri, {
       'name' => config.builder_name,
@@ -45,13 +50,16 @@ while not interrupted
     res.body.split("\n").each do |line|
       next if (line = line.strip).empty?
       command, *args = line.split("\t")
-      case command
+      case command.upcase
       when 'SETPOLL'
         new_interval = [60*20, args[0].to_i].min
         if new_interval >= 30 && config.poll_interval != new_interval
           config.poll_interval = new_interval
           log "Poll interval set to #{config.poll_interval}"
         end
+      when 'SAY'
+        log "Saying #{args[0]}"
+        invoke('say', args[0])
       end
     end
   end

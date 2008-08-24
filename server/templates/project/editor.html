@@ -11,8 +11,13 @@
 {% endif %}
 
 <form action="{% if edit %}/projects/{{ project.urlname }}/edit{% else %}/projects/create{% endif %}" method="post">
-  <p>Name: <input type="text" name="project_name" size="60" value="{{ project.name }}"></p>
+  <p>Name:<br>
+  <input type="text" name="project_name" size="60" value="{{ project.name }}"></p>
   {% if errors.name %}<div class="error">Error: {{ errors.name }}</div>{% endif %}
+  <p>Script:<br>
+  <textarea name="project_script" cols="60" rows="20">{{ project.script }}</textarea>
+  </p>
+  {% if errors.script %}<div class="error">Error: {{ errors.script }}</div>{% endif %}
 {% if edit %}
   <p><input type="submit" value="Save Changes"> or <a class="nav" href="/projects/{{ project.urlname }}">Cancel</a></p>
 {% else %}

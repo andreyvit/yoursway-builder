@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import os
+import logging
+
 from datetime import datetime, timedelta
 from google.appengine.ext.webapp import template
 from google.appengine.api import users
@@ -62,6 +64,7 @@ class Project(db.Model):
   name = db.StringProperty()
   owner = db.UserProperty()
   created_at = db.DateTimeProperty(auto_now_add=True)
+  script = db.TextProperty()
   
   def validate(self):  
     self.name = self.name.strip()
@@ -83,6 +86,12 @@ class Builder(db.Model):
   def bind_environment(self, config, now):
     self._since_last_check = delta_to_seconds(now - self.last_check_at)
     self._config = config
+    
+  def set_message_count(self, count):
+    self._message_count = count
+    
+  def message_count(self):
+    return self._message_count
   
   def since_last_check(self):
     return self._since_last_check
@@ -91,7 +100,10 @@ class Builder(db.Model):
     return self._since_last_check < self._config.builder_offline_after
     
 class Message(db.Model):
-  pass
+  builder = db.ReferenceProperty(Builder, collection_name = 'messages')
+  created_at = db.DateTimeProperty(auto_now_add = True)
+  body = db.TextProperty()
+  state = db.IntegerProperty(default = 0)
 
 class BaseHandler(webapp.RequestHandler):
   def __init__(self):
@@ -124,7 +136,12 @@ class BaseHandler(webapp.RequestHandler):
         user_is_server_admin = users.is_current_user_admin())
     
   def fetch_active_builders(self):
-    return Builder.all().filter('last_check_at > ', (self.now - timedelta(seconds=self.config.builder_is_recent_within))).fetch(20)
+    result = Builder.all().filter('last_check_at > ', (self.now - timedelta(seconds=self.config.builder_is_recent_within))).fetch(20)
+    for builder in result:
+      count = builder.messages.count(limit = 10)
+      logging.info("count for builder %s: %d" % (builder.name, count))
+      builder.set_message_count(count)
+    return result
 
 class ProjectsHandler(BaseHandler):
   @prepare_stuff
@@ -149,6 +166,7 @@ class CreateProjectHandler(BaseHandler):
     if self.user:
       project.owner = self.user
     project.name = self.request.get('project_name')
+    project.script = self.request.get('project_script')
     
     errors = project.validate()
     if len(errors) == 0:
@@ -211,6 +229,28 @@ class ProjectHandler(BaseHandler):
       builders = online_builders + recent_builders,
     )
     self.render('project', 'index.html')
+
+class BuildProjectHandler(BaseHandler):
+  @prepare_stuff
+  def post(self, project_key):
+    project = Project.get(project_key)
+    builder = Builder.all().filter('name = ', self.request.get('builder')).get()
+    if builder == None:
+      logging.warning("BuildProjectHandler: attemp to build %s using a non-existent builder %s" % (project.name, self.request.get('builder')))
+      self.error(500)
+      return
+    version = self.request.get('version')
+    if version == None or len(version) == 0:
+      logging.warning("BuildProjectHandler: version is not specified")
+      self.error(500)
+      return
+
+    body = "SET\tver\t%s\n%s" % (version, project.script)
+    
+    message = Message(builder = builder, body = body)
+    message.put()
+    
+    self.redirect('/projects/%s' % project.urlname())
 
 class ObtainWorkHandler(BaseHandler):
   def get(self):
@@ -278,6 +318,8 @@ url_mapping = [
   ('/projects/([^/]*)', ProjectHandler),
   ('/projects/([^/]*)/edit', EditProjectHandler),
   ('/projects/([^/]*)/delete', DeleteProjectHandler),
+  ('/projects/([^/]*)/build', BuildProjectHandler),
+  
   ('/builders/obtain-work', ObtainWorkHandler),
   ('/server-config', ServerConfigHandler),
   ('/server-admin-required', ServerAdminRequiredHandler)
