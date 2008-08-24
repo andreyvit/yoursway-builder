@@ -7,6 +7,8 @@
   <p>YourSway Builder server name: <input type="text" name="server_name" value="{{ config.server_name }}">.</p>
   <p>Builders should poll every <input type="text" name="builder_poll_interval" value="{{ config.builder_poll_interval }}" size="5"> seconds.</p>
   <p>Builders are considered offline after <input type="text" name="builder_offline_after" value="{{ config.builder_offline_after }}" size="5"> seconds without polls.</p>
+  <p>Show builders that have been online within <input type="text" name="builder_is_recent_within" value="{{ config.builder_is_recent_within }}" size="7"> seconds.</p>
+
   <p>
 	<input type="submit" value="Save Configuration">
 	{% if config.is_saved %}

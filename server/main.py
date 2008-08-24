@@ -54,6 +54,7 @@ class InstallationConfig(db.Model):
   server_name = db.TextProperty()
   builder_poll_interval = db.IntegerProperty(default = 60)
   builder_offline_after = db.IntegerProperty(default = 120)
+  builder_is_recent_within = db.IntegerProperty(default = 60*60*24)
 
 config_query = InstallationConfig.gql("LIMIT 1")
 
@@ -72,8 +73,6 @@ class Project(db.Model):
   def urlname(self):
     return "%s" % (self.key(),)
     
-
-
 class Builder(db.Model):
   name = db.StringProperty()
   created_at = db.DateTimeProperty(auto_now_add = True)
@@ -90,6 +89,9 @@ class Builder(db.Model):
   
   def is_online(self):
     return self._since_last_check < self._config.builder_offline_after
+    
+class Message(db.Model):
+  pass
 
 class BaseHandler(webapp.RequestHandler):
   def __init__(self):
@@ -121,6 +123,8 @@ class BaseHandler(webapp.RequestHandler):
       self.data.update(user = self.user.nickname(), logout_url = users.create_logout_url(self.request.uri),
         user_is_server_admin = users.is_current_user_admin())
     
+  def fetch_active_builders(self):
+    return Builder.all().filter('last_check_at > ', (self.now - timedelta(seconds=self.config.builder_is_recent_within))).fetch(20)
 
 class ProjectsHandler(BaseHandler):
   @prepare_stuff
@@ -195,17 +199,25 @@ class ProjectHandler(BaseHandler):
   @prepare_stuff
   def get(self, project_key):
     project = Project.get(project_key)
-    builders = Builder.all().filter('last_check_at > ', (datetime.now() - timedelta(seconds=self.config.builder_offline_after*5))).fetch(20)
+    builders = self.fetch_active_builders()
     for builder in builders:
       builder.bind_environment(self.config, self.now)
     online_builders = [b for b in builders if b.is_online()]
     recent_builders = [b for b in builders if not b.is_online()]
-    self.data.update(project = project, online_builders = online_builders, recent_builders = recent_builders)
+    self.data.update(
+      project = project,
+      online_builders = online_builders,
+      recent_builders = recent_builders,
+      builders = online_builders + recent_builders,
+    )
     self.render('project', 'index.html')
 
 class ObtainWorkHandler(BaseHandler):
-  @prepare_stuff
   def get(self):
+    self.post()
+    
+  @prepare_stuff
+  def post(self):
     name = self.request.get('name')
     if name == None or len(name) == 0:
       self.error(501)
@@ -215,7 +227,7 @@ class ObtainWorkHandler(BaseHandler):
       builder = Builder(name = name)
     builder.last_check_at = datetime.now()
     builder.put()
-    self.response.out.write('NONE')
+    self.response.out.write("SETPOLL\t%d" % self.config.builder_poll_interval)
 
 class ServerConfigHandler(BaseHandler):
   @must_be_admin
@@ -243,6 +255,9 @@ class ServerConfigHandler(BaseHandler):
       return
       
     config.server_name = db.Text(self.request.get('server_name'))
+    config.builder_poll_interval = int(self.request.get('builder_poll_interval'))
+    config.builder_offline_after = int(self.request.get('builder_offline_after'))
+    config.builder_is_recent_within = int(self.request.get('builder_is_recent_within'))
     if len(config.server_name) == 0:
       self.render(config)
       return
