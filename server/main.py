@@ -269,11 +269,11 @@ class ObtainWorkHandler(BaseHandler):
     builder.put()
     message = builder.messages.order('created_at').get()
     if message == None:
-      self.response.out.write("SETPOLL\t%d" % self.config.builder_poll_interval)
+      self.response.out.write("IDLE\tv1\t%d" % self.config.builder_poll_interval)
     else:
       message.state = 1
       message.put()
-      body = "JOBID\t%s\n%s" % (message.key(), message.body)
+      body = "ENVELOPE\tv1\t%s\n%s" % (message.key(), message.body)
       self.response.out.write(body)
 
 class ServerConfigHandler(BaseHandler):
