@@ -44,6 +44,7 @@ while not interrupted
   res = Net::HTTP.post_form(uri, {
       'name' => config.builder_name,
     })
+  wait_before_polling = true
   if res.code.to_i != 200
     log "Error response: code #{res.code}"
   else
@@ -60,10 +61,15 @@ while not interrupted
       when 'SAY'
         log "Saying #{args[0]}"
         invoke('say', args[0])
+        wait_before_polling = false
+      else
+        log "Unknown command #{command}(#{args.join(', ')})"
       end
     end
   end
   
-  log "Sleeping for #{config.poll_interval} seconds"
-  sleep config.poll_interval
+  if wait_before_polling
+    log "Sleeping for #{config.poll_interval} seconds"
+    sleep config.poll_interval
+  end
 end
