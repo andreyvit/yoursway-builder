@@ -4,10 +4,14 @@
 {% block content %}
 <h1>Server configuration</h1>
 <form action="/server-config" method="post">
-  <div>YourSway Builder server name: <input type="text" name="server_name" value="{{ config.server_name }}"></div>
-  <div><input type="submit" value="Save Configuration"></div>
-  {% if config.is_saved %}
-    <div><input type="submit" name="delete" value="Remove Configuration"></div>
-  {% endif %}
+  <p>YourSway Builder server name: <input type="text" name="server_name" value="{{ config.server_name }}">.</p>
+  <p>Builders should poll every <input type="text" name="builder_poll_interval" value="{{ config.builder_poll_interval }}" size="5"> seconds.</p>
+  <p>Builders are considered offline after <input type="text" name="builder_offline_after" value="{{ config.builder_offline_after }}" size="5"> seconds without polls.</p>
+  <p>
+	<input type="submit" value="Save Configuration">
+	{% if config.is_saved %}
+		or <input type="submit" name="delete" value="Delete Configuration">
+	{% endif %}
+  </p>
 </form>
 {% endblock %}

@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 
 import os
+from datetime import datetime, timedelta
 from google.appengine.ext.webapp import template
 from google.appengine.api import users
 from google.appengine.ext import db
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp.util import run_wsgi_app
 
+from yslib.dates import time_delta_in_words, delta_to_seconds
+
 template_path = os.path.join(os.path.dirname(__file__), 'templates')
+template.register_template_library('myfilters')
 
 def prepare_stuff(f):
   def wrapper(self, *args, **kwargs):
@@ -48,6 +52,8 @@ def must_be_admin(f):
 
 class InstallationConfig(db.Model):
   server_name = db.TextProperty()
+  builder_poll_interval = db.IntegerProperty(default = 60)
+  builder_offline_after = db.IntegerProperty(default = 120)
 
 config_query = InstallationConfig.gql("LIMIT 1")
 
@@ -65,11 +71,25 @@ class Project(db.Model):
     
   def urlname(self):
     return "%s" % (self.key(),)
+    
 
-class Greeting(db.Model):
-  author = db.UserProperty()
-  content = db.StringProperty(multiline=True)
-  date = db.DateTimeProperty(auto_now_add=True)
+
+class Builder(db.Model):
+  name = db.StringProperty()
+  created_at = db.DateTimeProperty(auto_now_add = True)
+  last_check_at = db.DateTimeProperty()
+  busy = db.BooleanProperty()
+  progress = db.TextProperty()
+  
+  def bind_environment(self, config, now):
+    self._since_last_check = delta_to_seconds(now - self.last_check_at)
+    self._config = config
+  
+  def since_last_check(self):
+    return self._since_last_check
+  
+  def is_online(self):
+    return self._since_last_check < self._config.builder_offline_after
 
 class BaseHandler(webapp.RequestHandler):
   def __init__(self):
@@ -77,6 +97,9 @@ class BaseHandler(webapp.RequestHandler):
     self.data = dict()
     
   def prepare(self):
+    self.now = datetime.now()
+    self.data.update(now = self.now)
+    
     if self.config == None:
       self.redirect('/server-config')
       return False
@@ -168,16 +191,31 @@ class DeleteProjectHandler(BaseHandler):
     project.delete()
     self.redirect('/projects')
 
-  def render_editor(self, project, errors = dict()):
-    self.data.update(errors = errors, edit = True, project = project)
-    self.render('project', 'editor.html')
-
 class ProjectHandler(BaseHandler):
   @prepare_stuff
   def get(self, project_key):
     project = Project.get(project_key)
-    self.data.update(project = project)
+    builders = Builder.all().filter('last_check_at > ', (datetime.now() - timedelta(seconds=self.config.builder_offline_after*5))).fetch(20)
+    for builder in builders:
+      builder.bind_environment(self.config, self.now)
+    online_builders = [b for b in builders if b.is_online()]
+    recent_builders = [b for b in builders if not b.is_online()]
+    self.data.update(project = project, online_builders = online_builders, recent_builders = recent_builders)
     self.render('project', 'index.html')
+
+class ObtainWorkHandler(BaseHandler):
+  @prepare_stuff
+  def get(self):
+    name = self.request.get('name')
+    if name == None or len(name) == 0:
+      self.error(501)
+      return
+    builder = Builder.all().filter('name = ', name).get()
+    if builder == None:
+      builder = Builder(name = name)
+    builder.last_check_at = datetime.now()
+    builder.put()
+    self.response.out.write('NONE')
 
 class ServerConfigHandler(BaseHandler):
   @must_be_admin
@@ -225,6 +263,7 @@ url_mapping = [
   ('/projects/([^/]*)', ProjectHandler),
   ('/projects/([^/]*)/edit', EditProjectHandler),
   ('/projects/([^/]*)/delete', DeleteProjectHandler),
+  ('/builders/obtain-work', ObtainWorkHandler),
   ('/server-config', ServerConfigHandler),
   ('/server-admin-required', ServerAdminRequiredHandler)
 ]

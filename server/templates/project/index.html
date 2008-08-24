@@ -8,4 +8,27 @@
 
 <p><a class="nav" href="/projects">« Go back to the list of projects</a> | <a class="nav" href="/projects/{{ project.urlname }}/edit">Edit this project</a></p>
 
+<h2>New build?</h2>
+<form action="/projects/{{ project.urlname }}/build" method="post">
+<p><label for="version">Version: </label><input type="text" id="version" name="version" value="0.0.1"></p>
+<p><input type="submit" value="Start building"></p>
+</form>
+
+{% if online_builders %}
+	<h2>Builders</h2>
+	{% for builder in online_builders %}
+	<p>– “{{ builder.name }}” is <span style="color: green">online</span> (last ping {{ builder.since_last_check|revtimedelta }})</p>
+	{% endfor %}
+{% else %}
+	<h2>No online builders</h2>
+	<p>No builders are currently online.</p>
+{% endif %}
+{% if recent_builders %}
+	<p>Recently went offline:</p>
+	{% for builder in recent_builders %}
+	<p>– “{{ builder.name }}” is <span style="color: red">offline</span> (last ping {{ builder.since_last_check|revtimedelta }})</p>
+	{% endfor %}
+{% endif %}
+
+
 {% endblock %}
