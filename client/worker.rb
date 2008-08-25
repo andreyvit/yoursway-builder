@@ -40,6 +40,48 @@ def invoke cmd, *args
   system(cmd, *args)
 end
 
+class ExecutionError < Exception
+end
+
+class Executor
+  
+  def initialize
+    @variables = {}
+  end
+  
+  def subst value
+    return value.gsub(/\[([^\]]+)\]/) { |var|
+      @variables[$1] or raise ExecutionError.new("Undefined variable [#{$1}]")
+    }
+  end
+  
+  def execute command, args, data_lines
+    args.collect! { |arg| subst(arg) }
+    data_lines.each { |line|
+      line.collect! { |arg| subst(arg) }
+    }
+    
+    case command.upcase
+    when 'SAY'
+      do_say *args
+    when 'SET'
+      do_set *args
+    else
+      log "Unknown command #{command}(#{args.join(', ')})"
+    end
+  end
+  
+  def do_say text
+    log "Saying #{text}"
+    invoke('say', text)
+  end
+  
+  def do_set name, value
+    @variables[name] = value
+  end
+  
+end
+
 while not interrupted
   res = Net::HTTP.post_form(obtain_work_uri, {'token' => 42})
   wait_before_polling = true
@@ -51,7 +93,7 @@ while not interrupted
     result = []
     message_id = nil
     
-    command, *args = first_line.split("\t")
+    command, *args = first_line.chomp.split("\t")
     command.upcase!
     if ['IDLE', 'ENVELOPE'].include?(command)
       proto_ver = args[0]
@@ -69,18 +111,27 @@ while not interrupted
         end
       end
       
-      other_lines.each do |line|
-        next if (line = line.strip).empty?
+      executor = Executor.new
+      until other_lines.empty?
+        line = other_lines.shift.chomp
+        next if line.strip.empty?
+        
         command, *args = line.split("\t")
-        case command.upcase
-        when 'SAY'
-          log "Saying #{args[0]}"
-          invoke('say', args[0])
-        else
-          log "Unknown command #{command}(#{args.join(', ')})"
+        data = []
+        until other_lines.empty?
+          line = other_lines.shift.chomp
+          next if line.strip.empty?
+          if line[0..0] == "\t"
+            data << line[1..-1].split("\t")
+          else
+            other_lines.unshift line
+            break
+          end
         end
+        
+        executor.execute command, args, data
       end
-      
+        
       if message_id
         message_done_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/messages/%s/done" % message_id)
         res = Net::HTTP.post_form(message_done_uri, {'token' => 42})
