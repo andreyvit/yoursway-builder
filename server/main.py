@@ -103,6 +103,7 @@ class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   version = db.TextProperty()
   created_at = db.DateTimeProperty(auto_now_add = True)
+  created_by = db.UserProperty()
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -264,7 +265,7 @@ class BuildProjectHandler(BaseHandler):
       self.error(500)
       return
       
-    build = Build(project = project, version = version)
+    build = Build(project = project, version = version, created_by = self.user)
     build.put()
 
     body = "SET\tver\t%s\n%s" % (version, project.script)

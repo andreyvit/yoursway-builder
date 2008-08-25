@@ -44,7 +44,7 @@
 {% endif %}
 {% for build in builds %}
 <h3>{{ build.version }}</h3>
-<p>Build started at {{ build.created_at }}.</p>
+<p>Build started at {{ build.created_at }} by {{ build.created_by.nickname }}.</p>
 {% endfor %}
 
 {% endblock %}
