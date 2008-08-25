@@ -196,6 +196,7 @@ class EditProjectHandler(BaseHandler):
   def post(self, project_key):
     project = Project.get(project_key)
     project.name = self.request.get('project_name')
+    project.script = self.request.get('project_script')
 
     errors = project.validate()
     if len(errors) == 0:
