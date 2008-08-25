@@ -285,17 +285,21 @@ class BuilderObtainWorkHandler(BaseHandler):
     if name == None or len(name) == 0:
       self.error(501)
       return
+
+    message = None
     builder = Builder.all().filter('name = ', name).get()
     if builder == None:
       builder = Builder(name = name)
-    builder.last_check_at = datetime.now()
-
-    stale_messages = builder.messages.filter('state =', 1).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
-    for message in stale_messages:
-      message.state = 3
-      message.put()
+    else:
+      # handle stale messages
+      stale_messages = builder.messages.filter('state =', 1).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
+      for message in stale_messages:
+        message.state = 3
+        message.put()
     
-    message = builder.messages.filter('state =', 0).order('created_at').get()
+      # retrieve the next message to process
+      message = builder.messages.filter('state =', 0).order('created_at').get()
+      
     if message == None:
       self.response.out.write("IDLE\tv1\t%d" % self.config.builder_poll_interval)
       builder.busy = False
@@ -306,6 +310,7 @@ class BuilderObtainWorkHandler(BaseHandler):
       body = "ENVELOPE\tv1\t%s\n%s" % (message.key(), message.body)
       self.response.out.write(body)
       
+    builder.last_check_at = datetime.now()
     builder.put()
 
 class BuilderMessageDoneHandler(BaseHandler):
