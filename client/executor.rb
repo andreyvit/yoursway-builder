@@ -3,6 +3,7 @@ class Executor
   
   def initialize
     @variables = {}
+    @storage_dir_
   end
   
   def subst value
@@ -18,6 +19,8 @@ class Executor
     }
     
     case command.upcase
+    when 'PROJECT'
+      do_project *args
     when 'SAY'
       do_say *args
     when 'SET'
@@ -27,6 +30,11 @@ class Executor
     else
       log "Unknown command #{command}(#{args.join(', ')})"
     end
+  end
+  
+  def do_project name
+    @variables['project'] = name
+    @storage_dir = 
   end
   
   def do_say text
