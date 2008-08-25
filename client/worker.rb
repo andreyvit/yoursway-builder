@@ -27,12 +27,12 @@ config.builder_name = "bar"
 config.poll_interval = 59
 
 interrupted = false
-trap("INT") { interrupted = true }
+# trap("INT") { interrupted = true }
 
 obtain_work_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/obtain-work")
 
-executor_file = File.join(File.dirname(__FILE__), 'executor.rb')
-load executor_file
+executor_rb = File.expand_path(File.join(File.dirname(__FILE__), 'executor.rb'))
+load executor_rb
 
 def log message
   puts message
@@ -75,9 +75,9 @@ while not interrupted
         end
       end
       
-      load executor_file
-      
+      load executor_rb
       executor = Executor.new
+      
       until other_lines.empty?
         line = other_lines.shift.chomp
         next if line.strip.empty?

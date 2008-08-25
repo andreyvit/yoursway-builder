@@ -269,7 +269,7 @@ class BuildProjectHandler(BaseHandler):
     build = Build(project = project, version = version, created_by = self.user)
     build.put()
 
-    body = "SET\tver\t%s\n%s" % (version, project.script)
+    body = "SET\tver\t%s\nPROJECT\t%s\n%s" % (version, project.name, project.script)
     
     message = Message(builder = builder, build = build, body = body)
     message.put()
