@@ -31,6 +31,9 @@ trap("INT") { interrupted = true }
 
 obtain_work_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/obtain-work")
 
+executor_file = File.join(File.dirname(__FILE__), 'executor.rb')
+load executor_file
+
 def log message
   puts message
 end
@@ -41,45 +44,6 @@ def invoke cmd, *args
 end
 
 class ExecutionError < Exception
-end
-
-class Executor
-  
-  def initialize
-    @variables = {}
-  end
-  
-  def subst value
-    return value.gsub(/\[([^\]]+)\]/) { |var|
-      @variables[$1] or raise ExecutionError.new("Undefined variable [#{$1}]")
-    }
-  end
-  
-  def execute command, args, data_lines
-    args.collect! { |arg| subst(arg) }
-    data_lines.each { |line|
-      line.collect! { |arg| subst(arg) }
-    }
-    
-    case command.upcase
-    when 'SAY'
-      do_say *args
-    when 'SET'
-      do_set *args
-    else
-      log "Unknown command #{command}(#{args.join(', ')})"
-    end
-  end
-  
-  def do_say text
-    log "Saying #{text}"
-    invoke('say', text)
-  end
-  
-  def do_set name, value
-    @variables[name] = value
-  end
-  
 end
 
 while not interrupted
@@ -110,6 +74,8 @@ while not interrupted
           wait_before_polling = false
         end
       end
+      
+      load executor_file
       
       executor = Executor.new
       until other_lines.empty?
