@@ -12,8 +12,8 @@ class GitItem < RepositoryItem
     @path = nil
   end
   
-  def fetch_locally storage_dir
-    @path = File.join(storage_dir, @repository.name)
+  def fetch_locally project_dir
+    @path = File.join(project_dir, @repository.name)
     @repository.fetch_version @path, @version
     return @path
   end

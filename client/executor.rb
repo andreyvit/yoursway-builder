@@ -7,7 +7,7 @@ class Executor
     @variables = {}
     @repositories = {}
     @items = {}
-    @storage_dir_base = '/tmp/storage'
+    @storage_dir = '/tmp/storage'
   end
   
   def execute command, args, data_lines
@@ -44,13 +44,13 @@ private
   
   def get_item name
     item = @items[name] or return nil
-    item.fetch_locally(@storage_dir)
+    item.fetch_locally(@project_dir)
   end
   
   def do_project name
     @variables['project'] = name
-    @storage_dir = File.join(@storage_dir_base, name)
-    FileUtils.mkdir_p(@storage_dir)
+    @project_dir = File.join(@storage_dir, name)
+    FileUtils.mkdir_p(@project_dir)
   end
   
   def do_say text
