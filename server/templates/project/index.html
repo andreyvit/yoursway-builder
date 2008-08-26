@@ -38,15 +38,14 @@
 	{% endfor %}
 {% endif %}
 
-<h2>Last 10 builds</h2>
-{% if not builds %}
+<h2>Last {{ num_latest_builds }} builds</h2>
+{% if not latest_builds %}
 <p>No builds yet — hit Build to make the first one!</p>
 {% endif %}
-{% for build in builds %}
-<h3>{{ build.version }}</h3>
+{% for build in latest_builds %}
+<h3><a href="/projects/{{ project.urlname }}/builds/{{ build.urlname }}">{{ build.version }}</a></h3>
 <p><i>{{ build.since_start|revtimedelta }}</i> on {{ build.created_at|date }} — {{ build.created_by.nickname }} — builder {{ build.builder.name }}.</p>
 {% if build.stores %}
-  <h4>Results</h4>
   <dl>
   {% for store in build.stores %}
     <dt>Download from <b>{{ store.description }}</b>:</dt>
@@ -65,7 +64,27 @@
   {% endfor %}
   </dl>
 {% endif %}
-<pre><small>{{ build.report }}</small></pre>
 {% endfor %}
+
+{% if recent_builds %}
+<h2>Summary of {{ num_recent_builds }} more builds</h2>
+<table border="1" style="border-collapse: collapse;" cellspacing="0" cellpadding="4">
+  <tr>
+    <th>Version</th>
+    <th colspan="2">Date</th>
+    <th>Initiated by</th>
+    <th>Builder</th>
+  </tr>
+  {% for build in recent_builds %}
+    <tr>
+      <td><a href="/projects/{{ project.urlname }}/builds/{{ build.urlname }}">{{ build.version }}</a></td>
+      <td>{{ build.since_start|revtimedelta }}</td>
+      <td>{{ build.created_at|date }}</td>
+      <td>{{ build.created_by.nickname }}</td>
+      <td>{{ build.builder.name }}</td>
+    </tr>
+  {% endfor %}
+</table>
+{% endif %}
 
 {% endblock %}

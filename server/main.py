@@ -57,6 +57,8 @@ class InstallationConfig(db.Model):
   builder_poll_interval = db.IntegerProperty(default = 60)
   builder_offline_after = db.IntegerProperty(default = 120)
   builder_is_recent_within = db.IntegerProperty(default = 60*60*24)
+  num_latest_builds = db.IntegerProperty(default = 3)
+  num_recent_builds = db.IntegerProperty(default = 20)
 
 config_query = InstallationConfig.gql("LIMIT 1")
 
@@ -115,7 +117,7 @@ def split_tags(s):
 class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   builder = db.ReferenceProperty(Builder, collection_name = 'builds')
-  version = db.TextProperty()
+  version = db.StringProperty()
   report = db.TextProperty(default = '')
   created_at = db.DateTimeProperty(auto_now_add = True)
   created_by = db.UserProperty()
@@ -175,6 +177,9 @@ class Build(db.Model):
     
   def since_start(self):
     return self._since_start
+    
+  def urlname(self):
+    return self.version
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -304,6 +309,7 @@ class DeleteProjectHandler(BaseHandler):
     self.redirect('/projects')
 
 class ProjectHandler(BaseHandler):
+  
   @prepare_stuff
   def get(self, project_key):
     project = Project.by_urlname(project_key)
@@ -317,9 +323,15 @@ class ProjectHandler(BaseHandler):
     online_builders = [b for b in builders if b.is_online()]
     recent_builders = [b for b in builders if not b.is_online()]
     
-    builds = project.builds.order('-created_at').fetch(10)
+    num_latest = self.config.num_latest_builds
+    num_recent = self.config.num_recent_builds
+    builds = project.builds.order('-created_at').fetch(num_latest + num_recent)
     for build in builds:
       build.calculate_time_deltas(self.now)
+    
+    latest_builds = builds[0:num_latest]
+    recent_builds = builds[num_latest:num_latest+num_recent]
+    for build in latest_builds:
       build.calculate_derived_data()
 
     # calculate next version
@@ -334,10 +346,36 @@ class ProjectHandler(BaseHandler):
       online_builders = online_builders,
       recent_builders = recent_builders,
       builders = online_builders + recent_builders,
-      builds = builds,
+      latest_builds = latest_builds,
+      recent_builds = recent_builds,
+      num_latest_builds = num_latest,
+      num_recent_builds = num_recent,
       next_version = next_version,
     )
     self.render('project', 'index.html')
+
+class ProjectBuildHandler(BaseHandler):
+  @prepare_stuff
+  def get(self, project_key, build_key):
+    project = Project.by_urlname(project_key)
+    if project == None:
+      logging.warning("BuildHandler: project '%s' not found" % project_key)
+      self.error(404)
+      return
+    build = project.builds.filter('version =', build_key).order('-created_at').get()
+    if build == None:
+      logging.warning("BuildHandler: build '%s' not found in project '%s'" % (build_key, project_key))
+      self.error(404)
+      return
+
+    build.calculate_time_deltas(self.now)
+    build.calculate_derived_data()
+
+    self.data.update(
+      project = project,
+      build = build,
+    )
+    self.render('project', 'buildinfo.html')
 
 class BuildProjectHandler(BaseHandler):
   @prepare_stuff
@@ -466,6 +504,8 @@ class ServerConfigHandler(BaseHandler):
     config.builder_poll_interval = int(self.request.get('builder_poll_interval'))
     config.builder_offline_after = int(self.request.get('builder_offline_after'))
     config.builder_is_recent_within = int(self.request.get('builder_is_recent_within'))
+    config.num_latest_builds = int(self.request.get('num_latest_builds'))
+    config.num_recent_builds = int(self.request.get('num_recent_builds'))
     if len(config.server_name) == 0:
       self.render(config)
       return
@@ -487,6 +527,7 @@ url_mapping = [
   ('/projects/([^/]*)/edit', EditProjectHandler),
   ('/projects/([^/]*)/delete', DeleteProjectHandler),
   ('/projects/([^/]*)/build', BuildProjectHandler),
+  ('/projects/([^/]*)/builds/([^/]*)', ProjectBuildHandler),
   
   ('/builders/([^/]*)/obtain-work', BuilderObtainWorkHandler),
   ('/builders/([^/]*)/messages/([^/]*)/done', BuilderMessageDoneHandler),
