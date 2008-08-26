@@ -114,6 +114,7 @@ def split_tags(s):
     
 class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
+  builder = db.ReferenceProperty(Builder, collection_name = 'builds')
   version = db.TextProperty()
   report = db.TextProperty(default = '')
   created_at = db.DateTimeProperty(auto_now_add = True)
@@ -159,8 +160,14 @@ class Build(db.Model):
 
     self._stores = stores.values()
     
+  def calculate_time_deltas(self, now):
+    self._since_start = (now - self.created_at)
+    
   def stores(self):
     return self._stores
+    
+  def since_start(self):
+    return self._since_start
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -305,6 +312,7 @@ class ProjectHandler(BaseHandler):
     
     builds = project.builds.order('-created_at').fetch(10)
     for build in builds:
+      build.calculate_time_deltas(self.now)
       build.calculate_derived_data()
 
     # calculate next version
@@ -342,7 +350,7 @@ class BuildProjectHandler(BaseHandler):
       self.error(500)
       return
       
-    build = Build(project = project, version = version, created_by = self.user)
+    build = Build(project = project, version = version, builder = builder, created_by = self.user)
     build.put()
 
     body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, project.permalink, project.name, project.script)
