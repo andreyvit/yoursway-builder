@@ -14,6 +14,7 @@
 
 require 'net/http'
 require 'uri'
+require 'optparse'
 
 class Config
   attr_accessor :server_host, :builder_name
@@ -21,10 +22,38 @@ class Config
 end
 config = Config.new
 config.server_host = "localhost:8080"
-config.builder_name = "bar"
+config.builder_name = `hostname`.strip.gsub(/\..*$/, '')
+config.poll_interval = 59 # a default, will be overridden from the server
 
-# a default, will be overridden from the server
-config.poll_interval = 59
+OptionParser.new do |opts|
+  opts.banner = "Usage: ruby worker.rb [options]"
+  
+  opts.on( "-s", "--server SERVER", String, "the address of the YourSway Builder server to connect to (host or host:port)" ) do |opt|
+    config.server_host = opt
+  end
+
+  opts.on_tail("--default-poll", Integer, "default poll interval (will be overriden from the server, so only if the server is not reached)") do |val|
+    config.poll_interval = val
+  end
+
+  opts.on_tail("-H", "--help", "Show this message") do
+    puts opts
+    exit
+  end
+
+  opts.on_tail("--version", "Show version") do
+    puts "unknown version"
+    exit
+  end
+end.parse!
+
+puts "YourSway Builder build host"
+puts
+puts "Please verify that the following is correct. Push Ctrl-C to stop this builder."
+puts
+puts "Server:        #{config.server_host}"
+puts "Builder name:  #{config.builder_name}"
+puts
 
 interrupted = false
 # trap("INT") { interrupted = true }
