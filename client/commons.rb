@@ -149,6 +149,36 @@ class ScpLocation < Location
   
 end
 
+class AmazonS3Location < Location
+  
+  # accesskey!secretkey!bucket:path
+  def initialize tags, path
+    super(tags)
+    raise "invalid S3 path format '#{path}', should be accesskey!secretkey!bucket:path" unless path =~ /^([^!]+)!([^!]+)!([^:]+):/
+    @access_key = $1
+    @secret_access_key = $2
+    @bucket = $3
+    @path = $'
+    @path = "#{@path}/" if @path.length > 0 && @path[-1..-1] != '/'
+  end
+
+  def kind
+    :s3
+  end
+
+  def describe_location_of(item)
+    "#{@bucket}:#{@path}/#{item.name}"
+  end
+  
+  def put item
+    raise "cannot upload a directory to S3 (not supported yet, and not needed)" if item.directory?
+    local_path = item.fetch_locally(nil)
+    s3 = AmazonS3.new(@access_key, @secret_access_key)
+    s3.put_file @bucket, "#{@path}#{item.name}", local_path
+  end
+  
+end
+
 class Store
   
   KINDS = { :file => StoreFile, :directory => StoreDir }

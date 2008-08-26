@@ -1,5 +1,5 @@
 
-['commons.rb', 'git.rb'].each { |file_name| load File.join(File.dirname(__FILE__), file_name) }
+['commons.rb', 'git.rb', 'amazons3.rb'].each { |file_name| load File.join(File.dirname(__FILE__), file_name) }
 
 class String
   
@@ -138,13 +138,14 @@ private
     tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
     store = (@stores[name] ||= RemoteStore.new(name, tags, description))
     data_lines.each do |subcommand, *args|
+      args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
       case subcommand.upcase
       when 'SCP'
-        args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
         store.add_location! ScpLocation.new(*args)
       when 'HTTP'
-        args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
         store.add_location! HttpLocation.new(*args)
+      when 'S3'
+        store.add_location! AmazonS3Location.new(*args)
       end
     end
   end
