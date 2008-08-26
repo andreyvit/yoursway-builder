@@ -146,8 +146,12 @@ class Build(db.Model):
         if last_item == None:
           continue
         name, rem = (args+"\t").split("\t", 1)
+        store = stores[name]
+        if not 'public' in store['tags']:
+          last_item_in_store = None
+          continue
         last_item_in_store = dict(other_locations = [], **last_item)
-        stores[name]['items'].append(last_item_in_store)
+        store['items'].append(last_item_in_store)
       elif command == 'ACCESS':
         if last_item_in_store == None:
           continue
@@ -159,6 +163,7 @@ class Build(db.Model):
           last_item_in_store['other_locations'].append(location)
 
     self._stores = stores.values()
+    self._stores = filter(lambda store: len(store['items']) > 0, self._stores)
     
   def calculate_time_deltas(self, now):
     self._since_start = (now - self.created_at)

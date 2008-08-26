@@ -64,7 +64,7 @@ class Executor
       stores = @local_store.stores_for(item)
       unless stores.empty?
         report << ['ITEM', "#{item.kind}", item.name, item.tags.join(',').subst_empty('-'), item.description.subst_empty('-')]
-        stores.select { |store| store.public? }.each do |store|
+        stores.each do |store|
           report << ['INSTORE', store.name]
           
           locations_by_kind = {}
@@ -102,7 +102,7 @@ private
     @project_dir = File.join(@storage_dir, permalink)
     FileUtils.mkdir_p(@project_dir)
     
-    @local_store = LocalStore.new(@builder_name, ['public'], File.join(@project_dir, 'localitems'))
+    @local_store = LocalStore.new(@builder_name, [], File.join(@project_dir, 'localitems'))
     @stores[@local_store.name] = @local_store
   end
   
