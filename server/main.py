@@ -77,8 +77,12 @@ class Project(db.Model):
     return errors
     
   def urlname(self):
-    return "%s" % (self.key(),)
+    return "%s" % self.permalink
     
+  @staticmethod
+  def by_urlname(permalink):
+    return Project.all().filter('permalink =', permalink).get()    
+
 class Builder(db.Model):
   name = db.StringProperty()
   created_at = db.DateTimeProperty(auto_now_add = True)
@@ -152,7 +156,7 @@ class BaseHandler(webapp.RequestHandler):
       logging.info("count for builder %s: %d" % (builder.name, count))
       builder.set_message_count(count)
     return result
-
+    
 class ProjectsHandler(BaseHandler):
   @prepare_stuff
   def get(self):
@@ -193,12 +197,18 @@ class CreateProjectHandler(BaseHandler):
 class EditProjectHandler(BaseHandler):
   @prepare_stuff
   def get(self, project_key):
-    project = Project.get(project_key)
+    project = Project.by_urlname(project_key)
+    if project == None:
+      self.error(404)
+      return
     self.render_editor(project)          
 
   @prepare_stuff
   def post(self, project_key):
-    project = Project.get(project_key)
+    project = Project.by_urlname(project_key)
+    if project == None:
+      self.error(404)
+      return
     project.name = self.request.get('project_name')
     project.script = self.request.get('project_script')
     project.permalink = self.request.get('project_permalink')
@@ -217,7 +227,10 @@ class EditProjectHandler(BaseHandler):
 class DeleteProjectHandler(BaseHandler):
   @prepare_stuff
   def post(self, project_key):
-    project = Project.get(project_key)
+    project = Project.by_urlname(project_key)
+    if project == None:
+      self.error(404)
+      return
     confirm = self.request.get('confirm')
     if confirm != '1':
       self.redirect('/projects/%s/edit' % project.urlname())
@@ -229,7 +242,10 @@ class DeleteProjectHandler(BaseHandler):
 class ProjectHandler(BaseHandler):
   @prepare_stuff
   def get(self, project_key):
-    project = Project.get(project_key)
+    project = Project.by_urlname(project_key)
+    if project == None:
+      self.error(404)
+      return
     
     builders = self.fetch_active_builders()
     for builder in builders:
@@ -259,7 +275,10 @@ class ProjectHandler(BaseHandler):
 class BuildProjectHandler(BaseHandler):
   @prepare_stuff
   def post(self, project_key):
-    project = Project.get(project_key)
+    project = Project.by_urlname(project_key)
+    if project == None:
+      self.error(404)
+      return
     builder = Builder.all().filter('name = ', self.request.get('builder')).get()
     if builder == None:
       logging.warning("BuildProjectHandler: attemp to build %s using a non-existent builder %s" % (project.name, self.request.get('builder')))
