@@ -2,6 +2,7 @@
 
 import os
 import logging
+import cgi
 
 from datetime import datetime, timedelta
 from google.appengine.ext.webapp import template
@@ -41,10 +42,14 @@ level_names = {
 
 class Account(db.Model):
   user = db.UserProperty()
+  email = db.EmailProperty()
   level = db.IntegerProperty(default = NORMAL_LEVEL, choices = [ANONYMOUS_LEVEL, VIEWER_LEVEL, NORMAL_LEVEL, ADMIN_LEVEL, GOD_LEVEL])
   
   def level_name(self):
     return level_names[self.level]
+    
+  def urlname(self):
+    return self.email
 
 class Project(db.Model):
   name = db.StringProperty()
@@ -223,10 +228,12 @@ class BaseHandler(webapp.RequestHandler):
   def read_user(self):
     self.user = users.get_current_user()
     if self.user == None:
-      self.account = Account(user = None, level = ANONYMOUS_LEVEL)
+      self.account = Account(user = None, email = None, level = ANONYMOUS_LEVEL)
       self.data.update(username = None, login_url = users.create_login_url(self.request.uri))
     else:
-      self.account = (Account.all().filter('user =', self.user).get() or Account(user = self.user, level = ANONYMOUS_LEVEL))
+      self.account = (Account.all().filter('user =', self.user).get() or
+        Account.all().filter('email =', self.user.email()).get() or
+        Account(user = self.user, email = self.user.email(), level = ANONYMOUS_LEVEL))
       if users.is_current_user_admin() and self.account.level < GOD_LEVEL:
         # propagate new admins to gods
         self.account.level = GOD_LEVEL
@@ -234,6 +241,12 @@ class BaseHandler(webapp.RequestHandler):
       elif not users.is_current_user_admin() and self.account.level == GOD_LEVEL:
         # revoke god priveledges from ex-admins
         self.account.level = ADMIN_LEVEL
+        self.account.put()
+      if self.account.email == None:
+        self.account.email = self.user.email()
+        self.account.put()
+      if self.account.user == None:
+        self.account.user = self.user
         self.account.put()
       self.data.update(username = self.user.nickname(), logout_url = users.create_logout_url(self.request.uri))
     self.data.update(account = self.account)
@@ -314,6 +327,20 @@ class BaseHandler(webapp.RequestHandler):
       self.not_found("Builder ‘%s’ not found" % self.request.get('builder'))
     self.data.update(builder = self.builder)
     
+  def also_fetch_people(self):
+    self.people = Account.all().fetch(1000)
+    self.data.update(people = self.people)
+    
+  def fetch_person(self, person_component):
+    person_component = person_component.replace('%40', '@')
+    if person_component == 'new' or person_component == 'invite':
+      self.person = Account(level = ANONYMOUS_LEVEL)
+    else:
+      self.person = Account.all().filter('email =', person_component).get()
+      if self.person == None:
+        self.not_found("No user account exists for email address “%s”" % person_component)
+    self.data.update(person = self.person)
+    
 class ProjectsHandler(BaseHandler):
   @prolog(fetch = ['projects'])
   def get(self):
@@ -347,6 +374,41 @@ class CreateEditProjectHandler(BaseHandler):
     self.data.update(errors = errors, edit = self.project.is_saved())
     self.render_and_finish('project', 'editor.html')
 
+class PeopleHandler(BaseHandler):
+  @prolog(fetch = ['people'], required_level = ADMIN_LEVEL)
+  def get(self):
+    self.render_and_finish('people', 'index.html')
+
+class CrudePersonHandler(BaseHandler):
+  @prolog(path_components = ['person'], required_level = ADMIN_LEVEL)
+  def get(self, project_key):
+    self.render_editor()
+
+  @prolog(path_components = ['person'], required_level = ADMIN_LEVEL)
+  def post(self, project_key):
+    if self.person.is_saved and self.request.get('delete'):
+      if self.request.get('confirm'):
+        self.person.delete()
+        self.redirect_and_finish('/people')
+      else:
+        self.redirect_and_finish(self.request.uri)
+      
+    if not self.person.is_saved():
+      self.person.invited_by = self.user
+    self.person.email = self.request.get('email')
+    self.person.level = int(self.request.get('level'))
+
+    # errors = self.person.validate()
+    # if len(errors) == 0:
+    self.person.put()
+    self.redirect_and_finish('/people')
+    # else:
+    #   self.render_editor(errors)
+
+  def render_editor(self, errors = dict()):
+    self.data.update(errors = errors, edit = self.person.is_saved())
+    self.render_and_finish('people', 'invite.html')
+
 class DeleteProjectHandler(BaseHandler):
   @prolog(path_components = ['project'], required_level = ADMIN_LEVEL)
   def post(self, project_key):
@@ -368,7 +430,8 @@ class ProjectHandler(BaseHandler):
         builder.bind_environment(self.config, self.now)
       online_builders = [b for b in builders if b.is_online()]
       recent_builders = [b for b in builders if not b.is_online()]
-      self.data.update(online_builders = online_builders, recent_builders = recent_builders)
+      self.data.update(online_builders = online_builders, recent_builders = recent_builders,
+        builders = online_builders + recent_builders)
     
     num_latest = self.config.num_latest_builds
     num_recent = self.config.num_recent_builds
@@ -389,7 +452,6 @@ class ProjectHandler(BaseHandler):
       next_version = ".".join(v)
     
     self.data.update(
-      builders = online_builders + recent_builders,
       latest_builds = latest_builds,
       recent_builds = recent_builds,
       num_latest_builds = num_latest,
@@ -508,6 +570,9 @@ class ServerConfigHandler(BaseHandler):
     
 url_mapping = [
   ('/', IndexHandler),
+  ('/people', PeopleHandler),
+  ('/people/(invite)', CrudePersonHandler),
+  ('/people/([^/]*)', CrudePersonHandler),
   ('/projects', ProjectsHandler),
   ('/projects/(new)', CreateEditProjectHandler),
   ('/projects/([^/]*)', ProjectHandler),

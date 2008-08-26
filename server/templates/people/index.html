@@ -1,0 +1,26 @@
+{% extends "../layout.html" %}
+
+{% block title %}People & Permissions{% endblock %}
+
+{% block content %}
+
+<h1>People & Permissions</h1>
+
+<table border="1" style="border-collapse: collapse;" cellspacing="0" cellpadding="4">
+  <tr>
+    <th>E-mail</th>
+    <th>Permissions</th>
+  </tr>
+  {% for person in people %}
+    <tr>
+      <td><a href="/people/{{ person.email }}">{{ person.email }}</a></td>
+      <td>{{ person.level_name }}</td>
+    </tr>
+  {% endfor %}
+  <tr>
+    <td><a class="nav" href="/people/invite">Invite »</a></td>
+    <td>&nbsp;</td>
+  </tr>
+</table>
+
+{% endblock %}

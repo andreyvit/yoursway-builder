@@ -3,7 +3,9 @@
 {% block title %}Projects{% endblock %}
 
 {% block content %}
-<h1>Projects</h1>       
+<h1>Projects</h1>
+
+{% if at_least_admin %}<p><a class="nav" href="/people">People & Permissions »</a></p>{% endif %}
                 
 {% for project in projects %}
   <p><a href="/projects/{{ project.urlname }}"><b>{{ project.name }}</b></a> (created by {{ project.owner }})</p>

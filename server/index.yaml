@@ -10,7 +10,7 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
-# Used 15 times in query history.
+# Used 19 times in query history.
 - kind: Build
   properties:
   - name: project
@@ -31,7 +31,7 @@ indexes:
   - name: builder
   - name: created_at
 
-# Used 14 times in query history.
+# Used 396 times in query history.
 - kind: Message
   properties:
   - name: builder

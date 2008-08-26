@@ -1,0 +1,38 @@
+{% extends "../layout.html" %}
+
+{% block title %}{% if person.is_saved %}Edit {{ person.email }}{% else %}Invite{% endif %}{% endblock %}
+
+{% block content %}
+
+<h1>{% if person.is_saved %}Edit {{ person.email }}{% else %}Invite{% endif %}</h1>
+
+<form action="{% if person.is_saved %}/people/{{person.urlname}}{% else %}/people/invite{% endif %}" method="post">
+  <p>E-mail:<br>
+  <input type="text" name="email" size="60" value="{{ person.email }}"></p>
+  {% if errors.email %}<div class="error">Error: {{ errors.email }}</div>{% endif %}
+  
+  {% ifequal person.level 3 %}
+  <p>Cannot change permissions for a developer.</p>
+  {% else %}
+    <p>Permissions:<br>
+    <select name="level">
+      <option value="0" {% ifequal person.level 0 %}checked="checked"{% endifequal %}>View existing builds only</option>
+      <option value="1" {% ifequal person.level 1 %}checked="checked"{% endifequal %}>Start new builds (and view existing)</option>
+      <option value="2" {% ifequal person.level 2 %}checked="checked"{% endifequal %}>Administrator</option>
+    </select></p>
+    {% if errors.level %}<div class="error">Error: {{ errors.level }}</div>{% endif %}
+  {% endifequal %}
+
+  <p><input type="submit" value="{% if person.is_saved %}Save Changes{% else %}Create Account{% endif %}"> or <a class="nav" href="/people">Cancel</a></p>
+</form>
+
+{% if person.is_saved %}
+  <hr>
+  <h2>Delete {{ person.email }}?</h2>
+  <form action="/people/{{ person.urlname }}" method="post">
+    <p><input type="checkbox" id="confirm_deletion" name="confirm" value="1"><label for="confirm_deletion"> I understand this is irreversible</label></p>
+    <p><input type="submit" name="delete" value="Delete {{ person.email }}"></p>
+  </form>
+{% endif %}
+
+{% endblock %}
