@@ -123,6 +123,7 @@ class Build(db.Model):
     stores = dict()
     items = dict()
     last_item = None
+    last_item_in_store = None
     for line in self.report.split("\n"):
       if len(line) == 0:
         continue
@@ -135,25 +136,26 @@ class Build(db.Model):
         tags = split_tags(tags)
         if kind != 'file' or not 'featured' in tags:
           # skip this item
-          last_item = None
+          last_item_in_store = last_item = None
           continue
         if description == '-':
           description = name
-        last_item = items[name] = dict(kind=kind, name=name, tags=tags, description=description, other_locations=[])
+        last_item = items[name] = dict(kind=kind, name=name, tags=tags, description=description)
       elif command == 'INSTORE':
         if last_item == None:
           continue
         name, rem = (args+"\t").split("\t", 1)
-        stores[name]['items'].append(last_item)
+        last_item_in_store = dict(other_locations = [], **last_item)
+        stores[name]['items'].append(last_item_in_store)
       elif command == 'ACCESS':
-        if last_item == None:
+        if last_item_in_store == None:
           continue
         kind, tags, path, rem = (args+"\t").split("\t", 3)
         location = dict(kind=kind, tags=split_tags(tags), path=path)
-        if kind == 'url' and last_item['url_location'] == None:
-          last_item['url_location'] = location
+        if kind == 'url' and not last_item.has_key('url_location'):
+          last_item_in_store['url_location'] = location
         else:
-          last_item['other_locations'].append(location)
+          last_item_in_store['other_locations'].append(location)
 
     self._stores = stores.values()
     

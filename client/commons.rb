@@ -77,6 +77,10 @@ class Location
   def url?
     :url == kind
   end
+  
+  def put item
+    raise "#{self.class.name} does not support puts, so cannot put #{item.name}"
+  end
     
 end
 
@@ -108,7 +112,8 @@ class HttpLocation < Location
   
   attr_reader :url
   
-  def initialize url
+  def initialize tags, url
+    super(tags)
     @url = url
   end
   
@@ -122,15 +127,38 @@ class HttpLocation < Location
   
 end
 
+class ScpLocation < Location
+  
+  def initialize tags, path
+    super(tags)
+    @path = path
+  end
+
+  def kind
+    :filesystem
+  end
+
+  def describe_location_of(item)
+    "#{@path}/#{item.name}"
+  end
+  
+  def put item
+    local_path = item.fetch_locally(nil)
+    invoke 'scp', '-r', local_path, "#{@path}/#{item.name}"
+  end
+  
+end
+
 class Store
   
   KINDS = { :file => StoreFile, :directory => StoreDir }
   
   attr_reader :name, :locations, :tags
   
-  def initialize name, tags
+  def initialize name, tags, description
     @name = name
     @tags = tags
+    @description = description
     @locations = []
   end
   
@@ -150,7 +178,7 @@ end
 class LocalStore < Store
   
   def initialize builder_name, tags, path
-    super(builder_name, tags)
+    super(builder_name, tags, '')
     @local_location = LocalFileSystemLocation.new(['public'], builder_name, path)
     @locations << @local_location
     @item_stores = {}
@@ -181,6 +209,19 @@ class LocalStore < Store
   
   def item_has_been_put_into item, store
     (@item_stores[item] ||= []) << store
+  end
+  
+end
+
+class RemoteStore < Store
+  
+  def initialize name, tags, description
+    super(name, tags, description)
+  end
+  
+  def put item
+    @locations.first.put item
+    item.has_been_put_into self
   end
   
 end

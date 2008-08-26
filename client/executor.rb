@@ -1,5 +1,5 @@
 
-['commons.rb', 'git.rb'].each { |file_name| require File.join(File.dirname(__FILE__), file_name) }
+['commons.rb', 'git.rb'].each { |file_name| load File.join(File.dirname(__FILE__), file_name) }
 
 class String
   
@@ -38,6 +38,8 @@ class Executor
       do_invoke *args
     when 'GITREPOS'
       do_gitrepos data_lines, *args
+    when 'STORE'
+      do_store data_lines, *args
     when 'VERSION'
       do_version *args
     when 'NEWDIR'
@@ -46,6 +48,8 @@ class Executor
       do_new_item :file, *args
     when 'ALIAS'
       do_alias *args
+    when 'PUT'
+      do_put *args
     else
       log "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -130,6 +134,21 @@ private
     end
   end
   
+  def do_store data_lines, name, tags, description
+    tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
+    store = (@stores[name] ||= RemoteStore.new(name, tags, description))
+    data_lines.each do |subcommand, *args|
+      case subcommand.upcase
+      when 'SCP'
+        args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
+        store.add_location! ScpLocation.new(*args)
+      when 'HTTP'
+        args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
+        store.add_location! HttpLocation.new(*args)
+      end
+    end
+  end
+  
   def do_version version_name, repos_name, *args
     version_name = resolve_alias(version_name)
     raise "Duplicate version #{name}" unless @items[version_name].nil?
@@ -148,6 +167,16 @@ private
   
   def do_alias name, item_name
     @aliases[name] = resolve_alias(item_name)
+  end
+  
+  def do_put store_name, *item_names
+    store = @stores[store_name] or raise "PUT references unknown store '#{store_name}'"
+    item_names.each do |item_name|
+      item_name = resolve_alias(item_name)
+      item = @items[item_name] or raise "PUT references unknown item #{item_name}"
+      log "PUT of #{item.name} into #{store.name}..."
+      store.put item
+    end
   end
   
   def resolve_alias name
