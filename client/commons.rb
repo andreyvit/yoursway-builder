@@ -183,7 +183,7 @@ class Store
   
   KINDS = { :file => StoreFile, :directory => StoreDir }
   
-  attr_reader :name, :locations, :tags
+  attr_reader :name, :locations, :description, :tags
   
   def initialize name, tags, description
     @name = name

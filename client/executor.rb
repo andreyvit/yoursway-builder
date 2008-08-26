@@ -58,7 +58,7 @@ class Executor
   def create_report
     report = []
     @stores.values.each do |store|
-      report << ['STORE', store.name, store.tags.join(',').subst_empty('-')]
+      report << ['STORE', store.name, store.tags.join(',').subst_empty('-'), store.description.subst_empty('-')]
     end
     @local_store.all_items.each do |item|
       stores = @local_store.stores_for(item)

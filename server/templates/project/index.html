@@ -49,7 +49,7 @@
   <h4>Results</h4>
   <dl>
   {% for store in build.stores %}
-    <dt>Download from <b>{{ store.name }}</b>:</dt>
+    <dt>Download from <b>{{ store.description }}</b>:</dt>
     {% for item in store.items %}
       <dd>
         {% if item.url_location %}

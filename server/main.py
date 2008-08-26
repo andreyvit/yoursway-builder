@@ -130,8 +130,10 @@ class Build(db.Model):
         continue
       command, args = line.split("\t", 1)
       if command == 'STORE':
-        name, tags, rem = (args+"\t").split("\t", 2)
-        stores[name] = dict(name = name, tags = split_tags(tags), items = [])
+        name, tags, description, rem = (args+"\t\t").split("\t", 3)
+        if description == '-' or description == '':
+          description = name
+        stores[name] = dict(name = name, tags = split_tags(tags), description = description, items = [])
       elif command == 'ITEM':
         kind, name, tags, description, rem = (args+"\t").split("\t", 4)
         tags = split_tags(tags)
