@@ -120,17 +120,45 @@ class Build(db.Model):
   created_by = db.UserProperty()
   
   def calculate_derived_data(self):
-    pass
     stores = dict()
     items = dict()
+    last_item = None
     for line in self.report.split("\n"):
       if len(line) == 0:
         continue
       command, args = line.split("\t", 1)
       if command == 'STORE':
         name, tags, rem = (args+"\t").split("\t", 2)
-        
-        stores[name] = dict(name = name, tags = split_tags(tags))
+        stores[name] = dict(name = name, tags = split_tags(tags), items = [])
+      elif command == 'ITEM':
+        kind, name, tags, description, rem = (args+"\t").split("\t", 4)
+        tags = split_tags(tags)
+        if kind != 'file' or not 'featured' in tags:
+          # skip this item
+          last_item = None
+          continue
+        if description == '-':
+          description = name
+        last_item = items[name] = dict(kind=kind, name=name, tags=tags, description=description, other_locations=[])
+      elif command == 'INSTORE':
+        if last_item == None:
+          continue
+        name, rem = (args+"\t").split("\t", 1)
+        stores[name]['items'].append(last_item)
+      elif command == 'ACCESS':
+        if last_item == None:
+          continue
+        kind, tags, path, rem = (args+"\t").split("\t", 3)
+        location = dict(kind=kind, tags=split_tags(tags), path=path)
+        if kind == 'url' and last_item['url_location'] == None:
+          last_item['url_location'] = location
+        else:
+          last_item['other_locations'].append(location)
+
+    self._stores = stores.values()
+    
+  def stores(self):
+    return self._stores
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
