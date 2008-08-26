@@ -75,27 +75,29 @@ while not interrupted
         end
       end
       
-      load executor_rb
-      executor = Executor.new
+      unless other_lines.empty?
+        load executor_rb
+        executor = Executor.new
       
-      until other_lines.empty?
-        line = other_lines.shift.chomp
-        next if line.strip.empty?
-        
-        command, *args = line.split("\t")
-        data = []
         until other_lines.empty?
           line = other_lines.shift.chomp
           next if line.strip.empty?
-          if line[0..0] == "\t"
-            data << line[1..-1].split("\t")
-          else
-            other_lines.unshift line
-            break
-          end
-        end
         
-        executor.execute command, args, data
+          command, *args = line.split("\t")
+          data = []
+          until other_lines.empty?
+            line = other_lines.shift.chomp
+            next if line.strip.empty?
+            if line[0..0] == "\t"
+              data << line[1..-1].split("\t")
+            else
+              other_lines.unshift line
+              break
+            end
+          end
+        
+          executor.execute command, args, data
+        end
       end
         
       if message_id
