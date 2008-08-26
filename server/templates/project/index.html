@@ -1,10 +1,10 @@
 {% extends "../layout.html" %}
 
-{% block title %}Project {{ project.name }}{% endblock %}
+{% block title %}{{ project.name }}{% endblock %}
 
 {% block content %}
 
-<h1>Project: {{ project.name }}</h1>       
+<h1>{{ project.name }}</h1>       
 
 <p><a class="nav" href="/projects">« Go back to the list of projects</a>{% if at_least_admin %} | <a class="nav" href="/projects/{{ project.urlname }}/edit">Edit this project</a>{% endif %}</p>
 
