@@ -56,8 +56,9 @@ private
     item.fetch_locally(@project_dir)
   end
   
-  def do_project name
-    @variables['project'] = name
+  def do_project permalink, name
+    @variables['project'] = permalink
+    @variables['project-name'] = name
     @project_dir = File.join(@storage_dir, name)
     FileUtils.mkdir_p(@project_dir)
     

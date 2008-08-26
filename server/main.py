@@ -62,6 +62,7 @@ config_query = InstallationConfig.gql("LIMIT 1")
 
 class Project(db.Model):
   name = db.StringProperty()
+  permalink = db.StringProperty()
   owner = db.UserProperty()
   created_at = db.DateTimeProperty(auto_now_add=True)
   script = db.TextProperty()
@@ -71,6 +72,8 @@ class Project(db.Model):
     errors = dict()
     if len(self.name) == 0:
       errors.update(name = "project name is required")
+    if len(self.permalink) == 0:
+      errors.update(permalink = "project permalink is required")
     return errors
     
   def urlname(self):
@@ -174,6 +177,7 @@ class CreateProjectHandler(BaseHandler):
       project.owner = self.user
     project.name = self.request.get('project_name')
     project.script = self.request.get('project_script')
+    project.permalink = self.request.get('project_permalink')
     
     errors = project.validate()
     if len(errors) == 0:
@@ -197,6 +201,7 @@ class EditProjectHandler(BaseHandler):
     project = Project.get(project_key)
     project.name = self.request.get('project_name')
     project.script = self.request.get('project_script')
+    project.permalink = self.request.get('project_permalink')
 
     errors = project.validate()
     if len(errors) == 0:
@@ -269,7 +274,7 @@ class BuildProjectHandler(BaseHandler):
     build = Build(project = project, version = version, created_by = self.user)
     build.put()
 
-    body = "SET\tver\t%s\nPROJECT\t%s\n%s" % (version, project.name, project.script)
+    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, project.permalink, project.name, project.script)
     
     message = Message(builder = builder, build = build, body = body)
     message.put()
