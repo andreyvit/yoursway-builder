@@ -9,6 +9,8 @@
   <p><a href="/projects/{{ project.urlname }}"><b>{{ project.name }}</b></a> (created by {{ project.owner }})</p>
 {% endfor %}
 
-<p><a class="nav" href="/projects/create">Create project</a></p>
+{% if at_least_admin %}
+<p><a class="nav" href="/projects/new">Create project</a></p>
+{% endif %}
 
 {% endblock %}

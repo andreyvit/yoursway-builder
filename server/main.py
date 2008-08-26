@@ -15,45 +15,8 @@ from yslib.dates import time_delta_in_words, delta_to_seconds
 template_path = os.path.join(os.path.dirname(__file__), 'templates')
 template.register_template_library('myfilters')
 
-def prepare_stuff(f):
-  def wrapper(self, *args, **kwargs):
-    if not self.prepare():
-      return
-    return f(self, *args, **kwargs)
-  wrapper.__name__ = f.__name__
-  wrapper.__dict__ = f.__dict__
-  wrapper.__doc__  = f.__doc__
-  return wrapper
-
-def login_required(f):
-  def wrapper(self, *args, **kwargs):
-    user = users.get_current_user()
-    if user == None:
-      self.redirect(users.create_login_url(self.request.uri))
-      return
-    return f(self, *args, **kwargs)
-  wrapper.__name__ = f.__name__
-  wrapper.__dict__ = f.__dict__
-  wrapper.__doc__  = f.__doc__
-  return wrapper
-
-def must_be_admin(f):
-  def wrapper(self, *args, **kwargs):
-    user = users.get_current_user()
-    if user == None:
-      self.redirect(users.create_login_url(self.request.uri))
-      return
-    if not users.is_current_user_admin():
-      self.redirect('/server-admin-required')
-      return
-    return f(self, *args, **kwargs)
-  wrapper.__name__ = f.__name__
-  wrapper.__dict__ = f.__dict__
-  wrapper.__doc__  = f.__doc__
-  return wrapper
-
 class InstallationConfig(db.Model):
-  server_name = db.TextProperty()
+  server_name = db.TextProperty(default = 'YourSway Builder')
   builder_poll_interval = db.IntegerProperty(default = 60)
   builder_offline_after = db.IntegerProperty(default = 120)
   builder_is_recent_within = db.IntegerProperty(default = 60*60*24)
@@ -62,11 +25,33 @@ class InstallationConfig(db.Model):
 
 config_query = InstallationConfig.gql("LIMIT 1")
 
+ANONYMOUS_LEVEL = -1
+VIEWER_LEVEL    = 0
+NORMAL_LEVEL    = 1
+ADMIN_LEVEL     = 2
+GOD_LEVEL       = 3
+
+level_names = {
+  ANONYMOUS_LEVEL: 'guest',
+  VIEWER_LEVEL: 'viewer',
+  NORMAL_LEVEL: 'normal',
+  ADMIN_LEVEL: 'admin',
+  GOD_LEVEL: 'developer'
+}
+
+class Account(db.Model):
+  user = db.UserProperty()
+  level = db.IntegerProperty(default = NORMAL_LEVEL, choices = [ANONYMOUS_LEVEL, VIEWER_LEVEL, NORMAL_LEVEL, ADMIN_LEVEL, GOD_LEVEL])
+  
+  def level_name(self):
+    return level_names[self.level]
+
 class Project(db.Model):
   name = db.StringProperty()
   permalink = db.StringProperty()
   owner = db.UserProperty()
   created_at = db.DateTimeProperty(auto_now_add=True)
+  is_public = db.BooleanProperty(default = False)
   script = db.TextProperty()
   
   def validate(self):  
@@ -188,35 +173,103 @@ class Message(db.Model):
   body = db.TextProperty()
   state = db.IntegerProperty(default = 0)
 
+class FinishRequest(Exception):
+  pass
+
+class prolog(object):
+  def __init__(decor, path_components = [], fetch = [], config_needed = True, required_level = ANONYMOUS_LEVEL):
+    decor.config_needed = config_needed
+    decor.required_level = required_level
+    decor.path_components = path_components
+    decor.fetch = fetch
+    pass
+
+  def __call__(decor, original_func):
+    def decoration(self, *args):
+      try:
+        self.read_config(config_needed = decor.config_needed)
+        self.read_user()
+        self.effective_level = self.account.level
+        for func, arg in zip(decor.path_components, args):
+          getattr(self, 'fetch_%s' % func)(arg)
+        if self.effective_level < decor.required_level:
+          self.access_denied()
+        for func in decor.fetch:
+          getattr(self, 'also_fetch_%s' % func)()
+        self.elaborate_permissions_for_template()
+        return original_func(self, *args)
+      except FinishRequest:
+        pass
+    decoration.__name__ = original_func.__name__
+    decoration.__dict__ = original_func.__dict__
+    decoration.__doc__  = original_func.__doc__
+    return decoration
+
 class BaseHandler(webapp.RequestHandler):
   def __init__(self):
-    self.config = config_query.get()
-    self.data = dict()
-    
-  def prepare(self):
+    self.config = None
     self.now = datetime.now()
-    self.data.update(now = self.now)
+    self.data = dict(now = self.now)
     
+  def read_config(self, config_needed = True):
+    self.config = config_query.get()
     if self.config == None:
-      self.redirect('/server-config')
-      return False
-      
-    self.fill_in_user()
-    self.data.update(server_name = self.config.server_name)
-      
-    return True    
-    
-  def render(self, *path_components):
-    self.response.out.write(template.render(os.path.join(template_path, *path_components), self.data))
-    
-  def fill_in_user(self):
+      if config_needed:
+        self.redirect_and_finish('/server-config')
+      else:
+        self.config = InstallationConfig()
+    self.data.update(config = self.config, server_name = self.config.server_name)
+        
+  def read_user(self):
     self.user = users.get_current_user()
     if self.user == None:
-      self.data.update(user = None, login_url = users.create_login_url(self.request.uri),
-        user_is_server_admin = False)
+      self.account = Account(user = None, level = ANONYMOUS_LEVEL)
+      self.data.update(username = None, login_url = users.create_login_url(self.request.uri))
     else:
-      self.data.update(user = self.user.nickname(), logout_url = users.create_logout_url(self.request.uri),
-        user_is_server_admin = users.is_current_user_admin())
+      self.account = (Account.all().filter('user =', self.user).get() or Account(user = self.user, level = ANONYMOUS_LEVEL))
+      if users.is_current_user_admin() and self.account.level < GOD_LEVEL:
+        # propagate new admins to gods
+        self.account.level = GOD_LEVEL
+        self.account.put()
+      elif not users.is_current_user_admin() and self.account.level == GOD_LEVEL:
+        # revoke god priveledges from ex-admins
+        self.account.level = ADMIN_LEVEL
+        self.account.put()
+      self.data.update(username = self.user.nickname(), logout_url = users.create_logout_url(self.request.uri))
+    self.data.update(account = self.account)
+    
+  def elaborate_permissions_for_template(self):
+    self.data.update(
+      at_least_viewer = (self.effective_level >= VIEWER_LEVEL),
+      at_least_normal = (self.effective_level >= NORMAL_LEVEL),
+      at_least_admin = (self.effective_level >= ADMIN_LEVEL),
+    )
+
+  def redirect_and_finish(self, url):
+    self.redirect(url)
+    raise FinishRequest
+    
+  def render_and_finish(self, *path_components):
+    self.response.out.write(template.render(os.path.join(template_path, *path_components), self.data))
+    raise FinishRequest
+    
+  def access_denied(self, message = None):
+    if self.user == None and self.request.method == 'GET':
+      self.redirect_and_finish(users.create_login_url(self.request.uri))
+    self.die(403, 'access_denied.html', message=message)
+
+  def not_found(self, message = None):
+    self.die(404, 'not_found.html', message=message)
+
+  def invalid_request(self, message = None):
+    self.die(400, 'invalid_request.html', message=message)
+    
+  def die(self, code, template, message = None):
+    if message:
+      logging.warning("%d: %s" % (code, message))
+    self.error(code)
+    self.data.update(message = message)
+    self.render_and_finish('errors', template)
     
   def fetch_active_builders(self):
     result = Builder.all().filter('last_check_at > ', (self.now - timedelta(seconds=self.config.builder_is_recent_within))).fetch(20)
@@ -226,106 +279,100 @@ class BaseHandler(webapp.RequestHandler):
       builder.set_message_count(count)
     return result
     
+  def also_fetch_projects(self):
+    self.projects = Project.all().order('name').fetch(1000)
+    if self.effective_level < VIEWER_LEVEL:
+      self.projects = filter(lambda p : p.is_public, self.projects)
+    self.data.update(projects = self.projects)
+    
+  def fetch_project(self, project_component):
+    if project_component == 'new':
+      self.project = Project()
+    else:
+      self.project = Project.by_urlname(project_component)
+    if self.project == None:
+      self.not_found("Project ‘%s’ does not exist" % project_component)
+    if not self.project.is_public and self.effective_level < VIEWER_LEVEL:
+      self.access_denied("Access denied to project ‘%s’" % project_component)
+    self.data.update(project = self.project)
+    
+  def fetch_build(self, build_component):
+    self.build = self.project.builds.filter('version =', build_component).order('-created_at').get()
+    if self.build == None:
+      self.not_found("Build '%s' not found in project '%s'" % (build_component, self.project.name))
+    self.data.update(build = self.build)
+    
+  def fetch_builder(self, builder_component):
+    self.builder = Builder.all().filter('name = ', builder_component).get()
+    if self.builder == None:
+      self.builder = Builder(name = builder_component)
+    self.data.update(builder = self.builder)
+    
+  def also_fetch_builder(self):
+    self.builder = Builder.all().filter('name = ', self.request.get('builder')).get()
+    if self.builder == None:
+      self.not_found("Builder ‘%s’ not found" % self.request.get('builder'))
+    self.data.update(builder = self.builder)
+    
 class ProjectsHandler(BaseHandler):
-  @prepare_stuff
+  @prolog(fetch = ['projects'])
   def get(self):
-    projects = Project.gql("ORDER BY name")
-    self.data.update(projects = projects)
-    self.render('projects', 'list.html')
+    self.render_and_finish('projects', 'list.html')
 
 class IndexHandler(BaseHandler):
   def get(self):
     self.redirect('projects')
 
-class CreateProjectHandler(BaseHandler):
-  @prepare_stuff
-  def get(self):
-    project = Project()
-    self.render_editor(project)          
-    
-  @prepare_stuff
-  def post(self):
-    project = Project()
-    if self.user:
-      project.owner = self.user
-    project.name = self.request.get('project_name')
-    project.script = self.request.get('project_script')
-    project.permalink = self.request.get('project_permalink')
-    
-    errors = project.validate()
-    if len(errors) == 0:
-      project.put()
-      self.redirect('/')
-    else:       
-      self.render_editor(project, errors)          
-      
-  def render_editor(self, project, errors = dict()):
-    self.data.update(errors = errors, edit = False, project = project)
-    self.render('project', 'editor.html')
-
-class EditProjectHandler(BaseHandler):
-  @prepare_stuff
+class CreateEditProjectHandler(BaseHandler):
+  @prolog(path_components = ['project'], required_level = ADMIN_LEVEL)
   def get(self, project_key):
-    project = Project.by_urlname(project_key)
-    if project == None:
-      self.error(404)
-      return
-    self.render_editor(project)          
+    self.render_editor()          
 
-  @prepare_stuff
+  @prolog(path_components = ['project'], required_level = ADMIN_LEVEL)
   def post(self, project_key):
-    project = Project.by_urlname(project_key)
-    if project == None:
-      self.error(404)
-      return
-    project.name = self.request.get('project_name')
-    project.script = self.request.get('project_script')
-    project.permalink = self.request.get('project_permalink')
+    if not self.project.is_saved():
+      self.project.owner = self.user
+    self.project.name = self.request.get('project_name')
+    self.project.script = self.request.get('project_script')
+    self.project.permalink = self.request.get('project_permalink')
 
-    errors = project.validate()
+    errors = self.project.validate()
     if len(errors) == 0:
-      project.put()
-      self.redirect('/projects/%s' % project.urlname())
+      self.project.put()
+      self.redirect('/projects/%s' % self.project.urlname())
     else:       
-      self.render_editor(project, errors)          
+      self.render_editor(errors)          
 
-  def render_editor(self, project, errors = dict()):
-    self.data.update(errors = errors, edit = True, project = project)
-    self.render('project', 'editor.html')
+  def render_editor(self, errors = dict()):
+    self.data.update(errors = errors, edit = self.project.is_saved())
+    self.render_and_finish('project', 'editor.html')
 
 class DeleteProjectHandler(BaseHandler):
-  @prepare_stuff
+  @prolog(path_components = ['project'], required_level = ADMIN_LEVEL)
   def post(self, project_key):
-    project = Project.by_urlname(project_key)
-    if project == None:
-      self.error(404)
-      return
     confirm = self.request.get('confirm')
     if confirm != '1':
-      self.redirect('/projects/%s/edit' % project.urlname())
+      self.redirect('/projects/%s/edit' % self.project.urlname())
       return
 
-    project.delete()
+    self.project.delete()
     self.redirect('/projects')
 
 class ProjectHandler(BaseHandler):
   
-  @prepare_stuff
+  @prolog(path_components = ['project'])
   def get(self, project_key):
-    project = Project.by_urlname(project_key)
-    if project == None:
-      self.error(404)
-      return
-    
-    builders = self.fetch_active_builders()
-    for builder in builders:
-      builder.bind_environment(self.config, self.now)
-    online_builders = [b for b in builders if b.is_online()]
-    recent_builders = [b for b in builders if not b.is_online()]
+    if self.effective_level > VIEWER_LEVEL:
+      builders = self.fetch_active_builders()
+      for builder in builders:
+        builder.bind_environment(self.config, self.now)
+      online_builders = [b for b in builders if b.is_online()]
+      recent_builders = [b for b in builders if not b.is_online()]
+      self.data.update(online_builders = online_builders, recent_builders = recent_builders)
     
     num_latest = self.config.num_latest_builds
     num_recent = self.config.num_recent_builds
-    builds = project.builds.order('-created_at').fetch(num_latest + num_recent)
+    builds = self.project.builds.order('-created_at').fetch(num_latest + num_recent)
     for build in builds:
       build.calculate_time_deltas(self.now)
     
@@ -342,9 +389,6 @@ class ProjectHandler(BaseHandler):
       next_version = ".".join(v)
     
     self.data.update(
-      project = project,
-      online_builders = online_builders,
-      recent_builders = recent_builders,
       builders = online_builders + recent_builders,
       latest_builds = latest_builds,
       recent_builds = recent_builds,
@@ -352,121 +396,80 @@ class ProjectHandler(BaseHandler):
       num_recent_builds = num_recent,
       next_version = next_version,
     )
-    self.render('project', 'index.html')
+    self.render_and_finish('project', 'index.html')
 
 class ProjectBuildHandler(BaseHandler):
-  @prepare_stuff
+  @prolog(path_components = ['project', 'build'])
   def get(self, project_key, build_key):
-    project = Project.by_urlname(project_key)
-    if project == None:
-      logging.warning("BuildHandler: project '%s' not found" % project_key)
-      self.error(404)
-      return
-    build = project.builds.filter('version =', build_key).order('-created_at').get()
-    if build == None:
-      logging.warning("BuildHandler: build '%s' not found in project '%s'" % (build_key, project_key))
-      self.error(404)
-      return
-
     build.calculate_time_deltas(self.now)
     build.calculate_derived_data()
-
-    self.data.update(
-      project = project,
-      build = build,
-    )
-    self.render('project', 'buildinfo.html')
+    self.render_and_finish('project', 'buildinfo.html')
 
 class BuildProjectHandler(BaseHandler):
-  @prepare_stuff
+  @prolog(path_components = ['project'], fetch = ['builder'], required_level = NORMAL_LEVEL)
   def post(self, project_key):
-    project = Project.by_urlname(project_key)
-    if project == None:
-      self.error(404)
-      return
-    builder = Builder.all().filter('name = ', self.request.get('builder')).get()
-    if builder == None:
-      logging.warning("BuildProjectHandler: attemp to build %s using a non-existent builder %s" % (project.name, self.request.get('builder')))
-      self.error(500)
-      return
     version = self.request.get('version')
     if version == None or len(version) == 0:
       logging.warning("BuildProjectHandler: version is not specified")
       self.error(500)
       return
       
-    build = Build(project = project, version = version, builder = builder, created_by = self.user)
+    build = Build(project = self.project, version = version, builder = self.builder, created_by = self.user)
     build.put()
 
-    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, project.permalink, project.name, project.script)
+    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, self.project.permalink, self.project.name, self.project.script)
     
-    message = Message(builder = builder, build = build, body = body)
+    message = Message(builder = self.builder, build = build, body = body)
     message.put()
     
-    self.redirect('/projects/%s' % project.urlname())
+    self.redirect_and_finish('/projects/%s' % self.project.urlname())
 
 class BuilderObtainWorkHandler(BaseHandler):
   def get(self):
     self.post()
     
-  @prepare_stuff
+  @prolog(path_components = ['builder'])
   def post(self, name):
-    if name == None or len(name) == 0:
-      self.error(501)
-      return
-
     message = None
-    builder = Builder.all().filter('name = ', name).get()
-    if builder == None:
-      builder = Builder(name = name)
-    else:
+    if self.builder.is_saved():
       # handle stale messages
-      stale_messages = builder.messages.filter('state =', 1).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
+      stale_messages = self.builder.messages.filter('state =', 1).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
       for message in stale_messages:
         message.state = 3
         message.put()
     
       # retrieve the next message to process
-      message = builder.messages.filter('state =', 0).order('created_at').get()
+      message = self.builder.messages.filter('state =', 0).order('created_at').get()
       
     if message == None:
       self.response.out.write("IDLE\tv1\t%d" % self.config.builder_poll_interval)
-      builder.busy = False
+      self.builder.busy = False
     else:
       message.state = 1
       message.put()
-      builder.busy = True
+      self.builder.busy = True
       body = "ENVELOPE\tv1\t%s\n%s" % (message.key(), message.body)
       self.response.out.write(body)
       
-    builder.last_check_at = datetime.now()
-    builder.put()
+    self.builder.last_check_at = datetime.now()
+    self.builder.put()
 
 class BuilderMessageDoneHandler(BaseHandler):
-  @prepare_stuff
+  @prolog(path_components = ['builder'])
   def post(self, name, message_key):
-    builder = Builder.all().filter('name = ', name).get()
-    if builder == None:
-      self.error(404)
-      return
-      
     report = self.request.get('report')
     if report == None:
       logging.warning("message done handler is called with empty report")
       report = ''
 
-    builder.last_check_at = datetime.now()
-    builder.put()
+    self.builder.last_check_at = datetime.now()
+    self.builder.put()
     
     message = Message.get(message_key)
     if message == None:
-      logging.warning("BuilderMessageDoneHandler: no message found with key %s" % message_key)
-      self.error(500)
-      return
-    if message.builder.key() != builder.key():
-      logging.warning("BuilderMessageDoneHandler: wrong builder - %s instead of %s" % (message.builder.key(), builder.key()))
-      self.error(500)
-      return
+      self.not_found("No message found with key %s" % message_key)
+    if message.builder.key() != self.builder.key():
+      self.invalid_request("The chosen message %s belongs to another builder" % message_key)
 
     message.state = 2
     message.put()
@@ -476,55 +479,39 @@ class BuilderMessageDoneHandler(BaseHandler):
     build.put()
 
 class ServerConfigHandler(BaseHandler):
-  @must_be_admin
+  @prolog(config_needed = False, required_level = ADMIN_LEVEL)
   def get(self):
-    config = config_query.get()
-    if config == None:
-      config = InstallationConfig(server_name = 'Untitled AppHome')
-    self.show_editor(config)
+    self.show_editor()
     
-  def show_editor(self, config):      
-    self.fill_in_user()
-    self.data.update(config = config)
-    self.render('server-config', 'editor.html')
-    
-  @must_be_admin
+  @prolog(config_needed = False, required_level = ADMIN_LEVEL)
   def post(self):
-    config = config_query.get()
-    if config == None:
-      config = InstallationConfig()
-      
     if self.request.get('delete'):
-      if config.is_saved():
-        config.delete()
+      if self.config.is_saved():
+        self.config.delete()
       self.redirect('/')
       return
       
-    config.server_name = db.Text(self.request.get('server_name'))
-    config.builder_poll_interval = int(self.request.get('builder_poll_interval'))
-    config.builder_offline_after = int(self.request.get('builder_offline_after'))
-    config.builder_is_recent_within = int(self.request.get('builder_is_recent_within'))
-    config.num_latest_builds = int(self.request.get('num_latest_builds'))
-    config.num_recent_builds = int(self.request.get('num_recent_builds'))
-    if len(config.server_name) == 0:
-      self.render(config)
-      return
+    self.config.server_name = db.Text(self.request.get('server_name'))
+    self.config.builder_poll_interval = int(self.request.get('builder_poll_interval'))
+    self.config.builder_offline_after = int(self.request.get('builder_offline_after'))
+    self.config.builder_is_recent_within = int(self.request.get('builder_is_recent_within'))
+    self.config.num_latest_builds = int(self.request.get('num_latest_builds'))
+    self.config.num_recent_builds = int(self.request.get('num_recent_builds'))
+    if len(self.config.server_name) == 0:
+      self.show_editor()
       
-    config.put()
+    self.config.put()
     self.redirect('/')
-    
-class ServerAdminRequiredHandler(BaseHandler):
-  @login_required
-  def get(self):
-    self.fill_in_user()
-    self.render('server-admin-required.html')
 
+  def show_editor(self):      
+    self.render_and_finish('server-config', 'editor.html')
+    
 url_mapping = [
   ('/', IndexHandler),
   ('/projects', ProjectsHandler),
-  ('/projects/create', CreateProjectHandler),
+  ('/projects/(new)', CreateEditProjectHandler),
   ('/projects/([^/]*)', ProjectHandler),
-  ('/projects/([^/]*)/edit', EditProjectHandler),
+  ('/projects/([^/]*)/edit', CreateEditProjectHandler),
   ('/projects/([^/]*)/delete', DeleteProjectHandler),
   ('/projects/([^/]*)/build', BuildProjectHandler),
   ('/projects/([^/]*)/builds/([^/]*)', ProjectBuildHandler),
@@ -532,7 +519,6 @@ url_mapping = [
   ('/builders/([^/]*)/obtain-work', BuilderObtainWorkHandler),
   ('/builders/([^/]*)/messages/([^/]*)/done', BuilderMessageDoneHandler),
   ('/server-config', ServerConfigHandler),
-  ('/server-admin-required', ServerAdminRequiredHandler)
 ]
 application = webapp.WSGIApplication(url_mapping, debug=True)
 

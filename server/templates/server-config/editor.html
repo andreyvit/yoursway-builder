@@ -1,8 +1,8 @@
 {% extends "../layout.html" %}
-{% block title %}AppHome Installation{% endblock %}
+{% block title %}{{ config.server_name }} Configuration{% endblock %}
 
 {% block content %}
-<h1>Server configuration</h1>
+<h1>{{ config.server_name }} Configuration</h1>
 <form action="/server-config" method="post">
   <p>YourSway Builder server name: <input type="text" name="server_name" value="{{ config.server_name }}">.</p>
   <p>Builders should poll every <input type="text" name="builder_poll_interval" value="{{ config.builder_poll_interval }}" size="5"> seconds.</p>

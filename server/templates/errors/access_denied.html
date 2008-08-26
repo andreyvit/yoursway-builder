@@ -1,0 +1,7 @@
+{% extends "../layout.html" %}
+{% block title %}Access Denied{% endblock %}
+
+{% block content %}
+{% if message %}<p><b>{{ message }}</b></p>{% endif %}
+<p>Sorry, you do not have access to this page. Why not go to the <a href="/">home page</a> instead?</p>
+{% endblock %}

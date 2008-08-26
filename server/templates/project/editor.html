@@ -10,7 +10,7 @@
 <h1>Create Project</h1>
 {% endif %}
 
-<form action="{% if edit %}/projects/{{ project.urlname }}/edit{% else %}/projects/create{% endif %}" method="post">
+<form action="{% if edit %}/projects/{{ project.urlname }}/edit{% else %}/projects/new{% endif %}" method="post">
   <p>Name (user-friendly):<br>
   <input type="text" name="project_name" size="60" value="{{ project.name }}"></p>
   {% if errors.name %}<div class="error">Error: {{ errors.name }}</div>{% endif %}
