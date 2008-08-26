@@ -75,9 +75,9 @@ while not interrupted
         end
       end
       
-      unless other_lines.empty?
+      if message_id
         load executor_rb
-        executor = Executor.new
+        executor = Executor.new(config.builder_name)
       
         until other_lines.empty?
           line = other_lines.shift.chomp
@@ -98,11 +98,10 @@ while not interrupted
         
           executor.execute command, args, data
         end
-      end
         
-      if message_id
+        report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
         message_done_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/messages/%s/done" % message_id)
-        res = Net::HTTP.post_form(message_done_uri, {'token' => 42})
+        res = Net::HTTP.post_form(message_done_uri, {'token' => 42, 'report' => report})
       end
     end
   end

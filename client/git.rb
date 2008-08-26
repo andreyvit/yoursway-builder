@@ -17,8 +17,7 @@ class GitItem < RepositoryItem
     @repository.fetch_version @path, @version
     return @path
   end
-  
-  
+
 end
 
 class GitBranchVersion

@@ -106,11 +106,31 @@ class Builder(db.Model):
   def is_online(self):
     return self._since_last_check < self._config.builder_offline_after
     
+def split_tags(s):
+  if s == '-':
+    return []
+  else:
+    return s.split(',')
+    
 class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   version = db.TextProperty()
+  report = db.TextProperty(default = '')
   created_at = db.DateTimeProperty(auto_now_add = True)
   created_by = db.UserProperty()
+  
+  def calculate_derived_data(self):
+    pass
+    stores = dict()
+    items = dict()
+    for line in self.report.split("\n"):
+      if len(line) == 0:
+        continue
+      command, args = line.split("\t", 1)
+      if command == 'STORE':
+        name, tags, rem = (args+"\t").split("\t", 2)
+        
+        stores[name] = dict(name = name, tags = split_tags(tags))
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -254,6 +274,8 @@ class ProjectHandler(BaseHandler):
     recent_builders = [b for b in builders if not b.is_online()]
     
     builds = project.builds.order('-created_at').fetch(10)
+    for build in builds:
+      build.calculate_derived_data()
 
     # calculate next version
     next_version = '0.0.1'
@@ -344,6 +366,11 @@ class BuilderMessageDoneHandler(BaseHandler):
     if builder == None:
       self.error(404)
       return
+      
+    report = self.request.get('report')
+    if report == None:
+      logging.warning("message done handler is called with empty report")
+      report = ''
 
     builder.last_check_at = datetime.now()
     builder.put()
@@ -360,6 +387,10 @@ class BuilderMessageDoneHandler(BaseHandler):
 
     message.state = 2
     message.put()
+    
+    build = message.build
+    build.report = report
+    build.put()
 
 class ServerConfigHandler(BaseHandler):
   @must_be_admin

@@ -1,11 +1,21 @@
 
 ['commons.rb', 'git.rb'].each { |file_name| require File.join(File.dirname(__FILE__), file_name) }
 
+class String
+  
+  def subst_empty default_value
+    if self.empty? then default_value else self end
+  end
+  
+end
+
 class Executor
   
-  def initialize
+  def initialize builder_name
+    @builder_name = builder_name # used to make create a local store name
     @variables = {}
     @repositories = {}
+    @stores = {}
     @items = {}
     @aliases = {}
     @storage_dir = '/tmp/storage'
@@ -41,6 +51,29 @@ class Executor
     end
   end
   
+  def create_report
+    report = []
+    @stores.values.each do |store|
+      report << ['STORE', store.name, store.tags.join(',').subst_empty('-')]
+    end
+    @local_store.all_items.each do |item|
+      stores = @local_store.stores_for(item)
+      unless stores.empty?
+        report << ['ITEM', "#{item.kind}", item.name, item.tags.join(',').subst_empty('-'), item.description.subst_empty('-')]
+        stores.select { |store| store.public? }.each do |store|
+          report << ['INSTORE', store.name]
+          
+          locations_by_kind = {}
+          store.locations.each { |location| locations_by_kind[location.kind] ||= location if location.public? }
+          locations_by_kind.values.each do |location|
+            report << ['ACCESS', "#{location.kind}", location.tags.join(',').subst_empty('-'), location.describe_location_of(item)]
+          end
+        end
+      end
+    end
+    return report
+  end
+  
 private
   
   def subst value
@@ -62,10 +95,11 @@ private
   def do_project permalink, name
     @variables['project'] = permalink
     @variables['project-name'] = name
-    @project_dir = File.join(@storage_dir, name)
+    @project_dir = File.join(@storage_dir, permalink)
     FileUtils.mkdir_p(@project_dir)
     
-    @local_store = LocalStore.new(File.join(@project_dir, 'localitems'))
+    @local_store = LocalStore.new(@builder_name, ['public'], File.join(@project_dir, 'localitems'))
+    @stores[@local_store.name] = @local_store
   end
   
   def do_say text
