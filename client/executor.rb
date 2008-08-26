@@ -29,6 +29,10 @@ class Executor
       do_gitrepos data_lines, *args
     when 'VERSION'
       do_version *args
+    when 'NEWDIR'
+      do_new_item :directory, *args
+    when 'NEWFILE'
+      do_new_item :file, *args
     else
       log "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -37,12 +41,17 @@ class Executor
 private
   
   def subst value
-    return value.gsub(/\[([^\]]+)\]/) { |var|
-      @variables[$1] or get_item($1) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
-    }
+    loop do
+      result = value.gsub(/\[([^\[\]]+)\]/) { |var|
+        @variables[$1] or get_item($1) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
+      }
+      return result if result == value
+      value = result
+    end
   end
   
   def get_item name
+    puts "Looking for item [#{name}]"
     item = @items[name] or return nil
     item.fetch_locally(@project_dir)
   end
@@ -51,6 +60,8 @@ private
     @variables['project'] = name
     @project_dir = File.join(@storage_dir, name)
     FileUtils.mkdir_p(@project_dir)
+    
+    @local_store = LocalStore.new(File.join(@project_dir, 'localitems'))
   end
   
   def do_say text
@@ -83,6 +94,13 @@ private
     repository = @repositories[repos_name]
     raise "Unknown repository #{repos_name}" if repository.nil?
     @items[version_name] = repository.create_item(version_name, *args)
+  end
+  
+  def do_new_item kind, name, tags, description
+    tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
+    item = @local_store.new_item(kind, name, tags, description)
+    puts "new item defined: [#{item.name}]"
+    @items[item.name] = item
   end
   
 end
