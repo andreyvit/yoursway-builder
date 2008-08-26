@@ -7,6 +7,7 @@ class Executor
     @variables = {}
     @repositories = {}
     @items = {}
+    @aliases = {}
     @storage_dir = '/tmp/storage'
   end
   
@@ -33,6 +34,8 @@ class Executor
       do_new_item :directory, *args
     when 'NEWFILE'
       do_new_item :file, *args
+    when 'ALIAS'
+      do_alias *args
     else
       log "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -51,7 +54,7 @@ private
   end
   
   def get_item name
-    puts "Looking for item [#{name}]"
+    name = resolve_alias(name)
     item = @items[name] or return nil
     item.fetch_locally(@project_dir)
   end
@@ -91,6 +94,7 @@ private
   end
   
   def do_version version_name, repos_name, *args
+    version_name = resolve_alias(version_name)
     raise "Duplicate version #{name}" unless @items[version_name].nil?
     repository = @repositories[repos_name]
     raise "Unknown repository #{repos_name}" if repository.nil?
@@ -98,10 +102,19 @@ private
   end
   
   def do_new_item kind, name, tags, description
+    name = resolve_alias(name)
     tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
     item = @local_store.new_item(kind, name, tags, description)
     puts "new item defined: [#{item.name}]"
     @items[item.name] = item
+  end
+  
+  def do_alias name, item_name
+    @aliases[name] = resolve_alias(item_name)
+  end
+  
+  def resolve_alias name
+    @aliases[name] || name
   end
   
 end
