@@ -78,6 +78,9 @@ private
   end
   
   def do_invoke app, *args
+    for name, value in @variables
+      ENV[name] = value
+    end
     args = [''] if args.empty? # or else shell will be invoked
     log "Invoking #{app} with arguments #{args.join(', ')}"
     system(app, *args)
