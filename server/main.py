@@ -509,8 +509,8 @@ class BuildProjectHandler(BaseHandler):
       self.error(500)
       return
       
-    existing = self.project.builds.filter('version =', version).count()
-    if not existing is None:
+    existing_count = self.project.builds.filter('version =', version).count()
+    if existing_count > 0:
       logging.info("Ignoring build request with the same version number (%s, project %s)" % (version, self.project.name))
       self.redirect_and_finish('/projects/%s' % self.project.urlname(),
         flash = "Version %s already exists. Please pick another." % version)
