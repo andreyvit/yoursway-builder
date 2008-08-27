@@ -71,7 +71,7 @@ private
       end
 
       break if Net::HTTPOK === response
-      break unless ((500...600).include? response.code.to_i) or force_retry
+      break unless (response && (500...600).include?(response.code.to_i)) or force_retry
       retries_left -= 1
       if retries_left <= 0
         raise "Amazon S3 operation failed, #{@retries_count} retries did not help."

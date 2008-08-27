@@ -75,10 +75,33 @@ end
 class ExecutionError < Exception
 end
 
+def try_network_operation
+  begin
+    return yield
+  rescue Errno::EPIPE => e
+    $stderr.puts "Broken pipe: #{e}" 
+  rescue Errno::ECONNRESET => e
+    $stderr.puts "Connection reset: #{e}" 
+  rescue Errno::ECONNABORTED => e
+    $stderr.puts "Connection aborted: #{e}" 
+  rescue Errno::ETIMEDOUT => e
+    $stderr.puts "Connection timed out: #{e}"
+  rescue Timeout::Error => e
+    $stderr.puts "Connection timed out: #{e}" 
+  rescue EOFError => e
+    $stderr.puts "EOF error: #{e}"
+  end
+  return nil
+end
+
 while not interrupted
-  res = Net::HTTP.post_form(obtain_work_uri, {'token' => 42})
+  res = try_network_operation do
+    Net::HTTP.post_form(obtain_work_uri, {'token' => 42})
+  end
   wait_before_polling = true
-  if res.code.to_i != 200
+  if res.nil?
+    #
+  elsif res.code.to_i != 200
     log "Error response: code #{res.code}"
   else
     first_line, *other_lines = res.body.split("\n")
@@ -105,32 +128,56 @@ while not interrupted
       end
       
       if message_id
-        load executor_rb
-        executor = Executor.new(config.builder_name)
+        report = nil
+        outcome = "SUCCESS"
+        begin
+          load executor_rb
+          executor = Executor.new(config.builder_name)
       
-        until other_lines.empty?
-          line = other_lines.shift.chomp
-          next if line.strip.empty?
-        
-          command, *args = line.split("\t")
-          data = []
           until other_lines.empty?
             line = other_lines.shift.chomp
             next if line.strip.empty?
-            if line[0..0] == "\t"
-              data << line[1..-1].split("\t")
-            else
-              other_lines.unshift line
-              break
+        
+            command, *args = line.split("\t")
+            data = []
+            until other_lines.empty?
+              line = other_lines.shift.chomp
+              next if line.strip.empty?
+              if line[0..0] == "\t"
+                data << line[1..-1].split("\t")
+              else
+                other_lines.unshift line
+                break
+              end
             end
+        
+            executor.execute command, args, data
           end
         
-          executor.execute command, args, data
+          report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
+        rescue Exception
+          outcome = "ERR"
+          failure_reason = "#{$!.class.name}: #{$!.message}\n#{($!.backtrace || []).join("\n")}"
+          puts "FAILURE REASON (message id #{message_id})\n"
+          puts "#{failure_reason}"
+          puts "END FAILURE REASON (message id #{message_id})"
         end
-        
-        report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
         message_done_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/messages/%s/done" % message_id)
-        res = Net::HTTP.post_form(message_done_uri, {'token' => 42, 'report' => report})
+        loop do
+          res = try_network_operation do
+            Net::HTTP.post_form(message_done_uri, {'token' => 42, 'report' => report, 'outcome' => outcome,
+              'failure_reason' => failure_reason})
+          end
+          if res.nil?
+            log "Could not post results, will repeat..."
+          elsif res.code.to_i != 200
+            log "Error posting results: code #{res.code}"
+          else
+            break
+          end
+          log "Will retry posting resuts in #{config.poll_interval} seconds"
+          sleep config.poll_interval
+        end
       end
     end
   end
