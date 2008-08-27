@@ -31,6 +31,10 @@ OptionParser.new do |opts|
   opts.on( "-s", "--server SERVER", String, "the address of the YourSway Builder server to connect to (host or host:port)" ) do |opt|
     config.server_host = opt
   end
+  
+  opts.on("-n", "--name NAME", String, "builder name (e.g. andreyvitmb)" ) do |opt|
+    config.builder_name = opt
+  end
 
   opts.on_tail("--default-poll", Integer, "default poll interval (will be overriden from the server, so only if the server is not reached)") do |val|
     config.poll_interval = val
