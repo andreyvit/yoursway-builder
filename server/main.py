@@ -104,11 +104,25 @@ def split_tags(s):
   else:
     return s.split(',')
     
+BUILD_ABANDONED = 0
+BUILD_SUCCEEDED = 1
+BUILD_FAILED = 2
+BUILD_INPROGRESS = 3
+    
+state_info = {
+  BUILD_ABANDONED:  dict(name = 'abandoned',  color = 'grey'),
+  BUILD_INPROGRESS: dict(name = 'inprogress', color = 'blue'),
+  BUILD_FAILED:     dict(name = 'failed',     color = 'red'),
+  BUILD_SUCCEEDED:    dict(name = 'succeeded',  color = 'green'),
+}
+
 class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   builder = db.ReferenceProperty(Builder, collection_name = 'builds')
+  state = db.IntegerProperty(default = BUILD_ABANDONED, choices = [BUILD_INPROGRESS, BUILD_SUCCEEDED, BUILD_FAILED, BUILD_ABANDONED])
   version = db.StringProperty()
   report = db.TextProperty(default = '')
+  failure_reason = db.TextProperty(default = '')
   created_at = db.DateTimeProperty(auto_now_add = True)
   created_by = db.UserProperty()
   
@@ -170,6 +184,17 @@ class Build(db.Model):
     
   def urlname(self):
     return self.version
+    
+  def state_name(self):
+    return state_info[self.state]['name']
+
+  def state_color(self):
+    return state_info[self.state]['color']
+    
+  def failure_reason_summary(self):
+    if len(self.failure_reason) == 0:
+      return "(unknown failure reason)"
+    return self.failure_reason.split("\n", 1)[0]
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -476,7 +501,8 @@ class BuildProjectHandler(BaseHandler):
       self.error(500)
       return
       
-    build = Build(project = self.project, version = version, builder = self.builder, created_by = self.user)
+    build = Build(project = self.project, version = version, builder = self.builder, created_by = self.user,
+      state = BUILD_INPROGRESS)
     build.put()
 
     body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, self.project.permalink, self.project.name, self.project.script)
@@ -538,6 +564,15 @@ class BuilderMessageDoneHandler(BaseHandler):
     
     build = message.build
     build.report = report
+    
+    outcome = self.request.get("outcome")
+    if outcome == 'ERR':
+      build.state = BUILD_FAILED
+      build.failure_reason = self.request.get("failure_reason")
+    elif outcome == 'SUCCESS':
+      build.state = BUILD_SUCCEEDED
+    else:
+      build.state = BUILD_ABANDONED
     build.put()
 
 class ServerConfigHandler(BaseHandler):

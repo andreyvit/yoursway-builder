@@ -4,8 +4,10 @@ runtime: python
 api_version: 1
 
 handlers:
-- url: .*
-  script: main.py
+- url: /images
+  static_dir: static/images
 - url: /admin/.*
   script: $PYTHON_LIB/google/appengine/ext/admin
   login: admin
+- url: .*
+  script: main.py
