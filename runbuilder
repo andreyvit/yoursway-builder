@@ -1,0 +1,14 @@
+#! /bin/sh
+allow_selfupdate=false
+test "$1" == "-U" && allow_selfupdate=true
+
+cd "$(dirname "$0")"
+mydir="$(pwd)"
+
+ruby "$mydir/client/worker.rb" "$@"
+if $allow_selfupdate; then
+  git fetch
+  git stash
+  git reset --hard origin/master
+fi
+exec "$mydir/$(basename "$0")" "$@"

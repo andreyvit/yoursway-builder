@@ -25,6 +25,12 @@ indexes:
   - name: created_at
     direction: desc
 
+# Used once in query history.
+- kind: Builder
+  properties:
+  - name: last_check_at
+    direction: desc
+
 # Unused in query history -- copied from input.
 - kind: Message
   properties:

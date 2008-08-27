@@ -36,6 +36,10 @@ OptionParser.new do |opts|
     config.poll_interval = val
   end
 
+  opts.on_tail("-U", "Allow self-updating (git fetch, git reset --hard)") do
+    # processed by the launcher script, has no effect here
+  end
+
   opts.on_tail("-H", "--help", "Show this message") do
     puts opts
     exit
@@ -108,7 +112,7 @@ while not interrupted
     
     command, *args = first_line.chomp.split("\t")
     command.upcase!
-    if ['IDLE', 'ENVELOPE'].include?(command)
+    if ['IDLE', 'ENVELOPE', 'SELFUPDATE'].include?(command)
       proto_ver = args[0]
       if proto_ver == 'v1'
         if command == 'IDLE'
@@ -118,6 +122,8 @@ while not interrupted
             log "Poll interval set to #{config.poll_interval}"
           end
           other_lines = []  # never execute
+        elsif command == 'SELFUPDATE'
+          exit!(55)
         else
           message_id = args[1]
           wait_before_polling = false

@@ -13,6 +13,14 @@
 
 {% if at_least_admin %}
 <p><a class="nav" href="/projects/new">Create project</a></p>
+
+<h2>Self-update?</h2>
+<form action="/self-update-request" method="post">
+  <p>This will tell all builders to restart. The builders that were started with -U option will additionally do “git fetch” and “git reset --hard origin/master”.</p>
+  <p><input type="checkbox" id="confirm_selfupdate" name="confirm" value="1"><label for="confirm_selfupdate">Confirmation (please check)</label></p>
+  <p><input type="submit" name="selfupdate" value="Tell All Builders To Update"></p>
+</form>
+
 {% endif %}
 
 {% endblock %}

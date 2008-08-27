@@ -84,6 +84,7 @@ class Builder(db.Model):
   last_check_at = db.DateTimeProperty()
   busy = db.BooleanProperty()
   progress = db.TextProperty()
+  self_update_requested = db.BooleanProperty(default = False)
   
   def bind_environment(self, config, now):
     self._since_last_check = delta_to_seconds(now - self.last_check_at)
@@ -539,6 +540,21 @@ class BuildProjectHandler(BaseHandler):
     self.redirect_and_finish('/projects/%s' % self.project.urlname(),
       flash = "Started bulding version %s. Please refresh this page to track status." % version)
 
+class SelfUpdateRequestHandler(BaseHandler):
+  
+  @prolog(required_level = ADMIN_LEVEL)
+  def post(self):
+    if self.request.get('confirm') != '1':
+      self.redirect_and_finish('/projects', flash = "Please confirm self-update by checking the box.")
+      
+    builders = Builder.all().order('-last_check_at').fetch(100)
+    for builder in builders:
+      builder.self_update_requested = True
+      builder.put()
+      
+    self.redirect_and_finish('/projects',
+      flash = "Requested self-update of the following builders: %s." % ', '.join(map(lambda b: b.name, builders)))
+
 class BuilderObtainWorkHandler(BaseHandler):
   def get(self):
     self.post()
@@ -559,6 +575,13 @@ class BuilderObtainWorkHandler(BaseHandler):
       for build in stale_builds:
         build.state = BUILD_ABANDONED
         build.put()
+        
+      # check for selfupdate request
+      if self.builder.self_update_requested:
+        self.builder.self_update_requested = False
+        self.builder.put()
+        self.response.out.write("SELFUPDATE\tv1")
+        raise FinishRequest
     
       # retrieve the next message to process
       message = self.builder.messages.filter('state =', 0).order('created_at').get()
@@ -640,6 +663,7 @@ class ServerConfigHandler(BaseHandler):
     
 url_mapping = [
   ('/', IndexHandler),
+  ('/self-update-request', SelfUpdateRequestHandler),
   ('/people', PeopleHandler),
   ('/people/(invite)', CrudePersonHandler),
   ('/people/([^/]*)', CrudePersonHandler),
