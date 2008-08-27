@@ -139,6 +139,7 @@ while not interrupted
           until other_lines.empty?
             line = other_lines.shift.chomp
             next if line.strip.empty?
+            next if line =~ /^#/
         
             command, *args = line.split("\t")
             data = []
