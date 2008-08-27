@@ -248,7 +248,13 @@ class BaseHandler(webapp.RequestHandler):
   def __init__(self):
     self.config = None
     self.now = datetime.now()
-    self._flash = Flash()
+    try:
+      self._flash = Flash()
+    except EOFError:
+      class PseudoFlash:
+        def __init__(self):
+          self.msg = ''
+      self._flash = PseudoFlash()
     self.data = dict(now = self.now, flash = self._flash.msg)
     
   def flash(self, message):
