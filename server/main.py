@@ -11,6 +11,7 @@ from google.appengine.api import users
 from google.appengine.ext import db
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp.util import run_wsgi_app
+from appengine_utilities.flash import Flash
 
 from yslib.dates import time_delta_in_words, delta_to_seconds
 
@@ -240,7 +241,11 @@ class BaseHandler(webapp.RequestHandler):
   def __init__(self):
     self.config = None
     self.now = datetime.now()
-    self.data = dict(now = self.now)
+    self._flash = Flash()
+    self.data = dict(now = self.now, flash = self._flash.msg)
+    
+  def flash(self, message):
+    self._flash.msg = message
     
   def read_config(self, config_needed = True):
     self.config = config_query.get()
@@ -284,7 +289,9 @@ class BaseHandler(webapp.RequestHandler):
       at_least_admin = (self.effective_level >= ADMIN_LEVEL),
     )
 
-  def redirect_and_finish(self, url):
+  def redirect_and_finish(self, url, flash = None):
+    if flash:
+      self.flash(flash)
     self.redirect(url)
     raise FinishRequest
     

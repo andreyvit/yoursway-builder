@@ -21,6 +21,7 @@ a.nav, a.nav:visited { color: blue; }
     <p><a class="nav" href="/">Home</a>{% if at_least_admin %} | <a class="nav" href="/server-config">Server Configuration</a>{% endif %}</p>
     
     <div id="content">
+      {% if flash %}<div style="padding: 10px; margin: 10px 0px; background: silver; font-size: bigger;">{{ flash }}</div>{% endif %}
       {% block content %}{% endblock %}
     </div>
 		<div id="footer">
