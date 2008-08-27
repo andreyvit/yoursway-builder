@@ -1,6 +1,20 @@
 
 ['commons.rb', 'git.rb', 'amazons3.rb'].each { |file_name| load File.join(File.dirname(__FILE__), file_name) }
 
+def invoke cmd, *args
+  args = [''] if args.empty?
+  msg = "INVOKE #{cmd}#{args.collect {|a| "\n  ARG #{a}"}.join('')}"
+  log msg
+  if not system(cmd, *args) 
+    basename = File.basename(cmd)
+    summary = case $?.exitstatus
+        when 127 then "'#{basename}' not found"
+        else          "'#{basename}' failed with code #{$?.exitstatus}"
+    end
+    raise "#{summary}\n#{msg}"
+  end
+end
+
 class String
   
   def subst_empty default_value
@@ -119,9 +133,7 @@ private
     for name, value in @variables
       ENV[name] = value
     end
-    args = [''] if args.empty? # or else shell will be invoked
-    log "Invoking #{app} with arguments #{args.join(', ')}"
-    system(app, *args)
+    invoke(app, *args)
   end
   
   def do_gitrepos data_lines, name

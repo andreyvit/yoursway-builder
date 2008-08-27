@@ -67,11 +67,6 @@ def log message
   puts message
 end
 
-def invoke cmd, *args
-  args = [''] if args.empty?
-  system(cmd, *args)
-end
-
 class ExecutionError < Exception
 end
 
