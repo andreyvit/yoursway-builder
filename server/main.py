@@ -251,7 +251,8 @@ class BaseHandler(webapp.RequestHandler):
     self.config = config_query.get()
     if self.config == None:
       if config_needed:
-        self.redirect_and_finish('/server-config')
+        self.redirect_and_finish('/server-config',
+          flash = "Please review the default configuration before the first use")
       else:
         self.config = InstallationConfig()
     self.data.update(config = self.config, server_name = self.config.server_name)
@@ -422,9 +423,11 @@ class CrudePersonHandler(BaseHandler):
     if self.person.is_saved and self.request.get('delete'):
       if self.request.get('confirm'):
         self.person.delete()
-        self.redirect_and_finish('/people')
+        self.redirect_and_finish('/people',
+          flash = "%s is deleted." % self.person.email)
       else:
-        self.redirect_and_finish(self.request.uri)
+        self.redirect_and_finish(self.request.uri,
+          flash = "Please confirm deletion by checking the box.")
       
     if not self.person.is_saved():
       self.person.invited_by = self.user
@@ -434,7 +437,8 @@ class CrudePersonHandler(BaseHandler):
     # errors = self.person.validate()
     # if len(errors) == 0:
     self.person.put()
-    self.redirect_and_finish('/people')
+    self.redirect_and_finish('/people',
+      flash = ("%s saved." if self.person.is_saved() else "%s added.") % self.person.email)
     # else:
     #   self.render_editor(errors)
 
@@ -524,7 +528,8 @@ class BuildProjectHandler(BaseHandler):
     message = Message(builder = self.builder, build = build, body = body)
     message.put()
     
-    self.redirect_and_finish('/projects/%s' % self.project.urlname())
+    self.redirect_and_finish('/projects/%s' % self.project.urlname(),
+      flash = "Started bulding version %s. Please refresh this page to track status." % version)
 
 class BuilderObtainWorkHandler(BaseHandler):
   def get(self):
