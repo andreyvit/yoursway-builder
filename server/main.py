@@ -489,8 +489,8 @@ class ProjectHandler(BaseHandler):
 class ProjectBuildHandler(BaseHandler):
   @prolog(path_components = ['project', 'build'])
   def get(self, project_key, build_key):
-    build.calculate_time_deltas(self.now)
-    build.calculate_derived_data()
+    self.build.calculate_time_deltas(self.now)
+    self.build.calculate_derived_data()
     self.render_and_finish('project', 'buildinfo.html')
 
 class BuildProjectHandler(BaseHandler):
