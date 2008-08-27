@@ -78,6 +78,8 @@ end
 def try_network_operation
   begin
     return yield
+  rescue Errno::ECONNREFUSED => e
+    $stderr.puts "Connection refused: #{e}" 
   rescue Errno::EPIPE => e
     $stderr.puts "Broken pipe: #{e}" 
   rescue Errno::ECONNRESET => e
