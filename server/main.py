@@ -23,6 +23,7 @@ class InstallationConfig(db.Model):
   builder_poll_interval = db.IntegerProperty(default = 60)
   builder_offline_after = db.IntegerProperty(default = 120)
   builder_is_recent_within = db.IntegerProperty(default = 60*60*24)
+  build_abandoned_after = db.IntegerProperty(default = 60*60)
   num_latest_builds = db.IntegerProperty(default = 3)
   num_recent_builds = db.IntegerProperty(default = 30)
 
@@ -177,6 +178,11 @@ class Build(db.Model):
     
   def calculate_time_deltas(self, now):
     self._since_start = (now - self.created_at)
+    
+  def check_abandoning(self, build_abandoned_after):
+    if self.state == BUILD_INPROGRESS and self._since_start > timedelta(seconds = build_abandoned_after):
+      self.state = BUILD_ABANDONED
+      self.put()
     
   def stores(self):
     return self._stores
@@ -475,6 +481,8 @@ class ProjectHandler(BaseHandler):
     builds = self.project.builds.order('-created_at').fetch(max(num_latest, num_recent))
     for build in builds:
       build.calculate_time_deltas(self.now)
+    for build in builds:
+      build.check_abandoning(self.config.build_abandoned_after)
     
     latest_builds = builds[0:num_latest]
     recent_builds = builds[0:num_recent]
@@ -544,6 +552,13 @@ class BuilderObtainWorkHandler(BaseHandler):
       for message in stale_messages:
         message.state = 3
         message.put()
+        
+      # handle stale builds
+      stale_builds = Build.all().filter('builder =', self.builder).filter('state =', BUILD_INPROGRESS).fetch(1000)
+      logging.info("found %d stale build(s)" % len(stale_builds))
+      for build in stale_builds:
+        build.state = BUILD_ABANDONED
+        build.put()
     
       # retrieve the next message to process
       message = self.builder.messages.filter('state =', 0).order('created_at').get()
@@ -613,6 +628,7 @@ class ServerConfigHandler(BaseHandler):
     self.config.builder_is_recent_within = int(self.request.get('builder_is_recent_within'))
     self.config.num_latest_builds = int(self.request.get('num_latest_builds'))
     self.config.num_recent_builds = int(self.request.get('num_recent_builds'))
+    self.config.build_abandoned_after = int(self.request.get('build_abandoned_after'))
     if len(self.config.server_name) == 0:
       self.show_editor()
       
