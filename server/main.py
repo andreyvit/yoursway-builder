@@ -24,7 +24,7 @@ class InstallationConfig(db.Model):
   builder_offline_after = db.IntegerProperty(default = 120)
   builder_is_recent_within = db.IntegerProperty(default = 60*60*24)
   num_latest_builds = db.IntegerProperty(default = 3)
-  num_recent_builds = db.IntegerProperty(default = 20)
+  num_recent_builds = db.IntegerProperty(default = 30)
 
 config_query = InstallationConfig.gql("LIMIT 1")
 
@@ -468,12 +468,12 @@ class ProjectHandler(BaseHandler):
     
     num_latest = self.config.num_latest_builds
     num_recent = self.config.num_recent_builds
-    builds = self.project.builds.order('-created_at').fetch(num_latest + num_recent)
+    builds = self.project.builds.order('-created_at').fetch(max(num_latest, num_recent))
     for build in builds:
       build.calculate_time_deltas(self.now)
     
     latest_builds = builds[0:num_latest]
-    recent_builds = builds[num_latest:num_latest+num_recent]
+    recent_builds = builds[0:num_recent]
     for build in latest_builds:
       build.calculate_derived_data()
 
