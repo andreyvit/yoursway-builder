@@ -247,6 +247,7 @@ class prolog(object):
   def __call__(decor, original_func):
     def decoration(self, *args):
       try:
+        self.read_flash()
         self.read_config(config_needed = decor.config_needed)
         self.read_user()
         self.effective_level = self.account.level
@@ -269,14 +270,18 @@ class BaseHandler(webapp.RequestHandler):
   def __init__(self):
     self.config = None
     self.now = datetime.now()
+    self.data = dict(now = self.now)
+    
+  def read_flash(self):
     try:
       self._flash = Flash()
     except EOFError:
+      # this is a workaround for an unknown problem when running live on Google App Engine
       class PseudoFlash:
         def __init__(self):
           self.msg = ''
       self._flash = PseudoFlash()
-    self.data = dict(now = self.now, flash = self._flash.msg)
+    self.data.update(flash = self._flash.msg)
     
   def flash(self, message):
     self._flash.msg = message
