@@ -65,6 +65,10 @@ class Executor
       do_new_item :directory, *args
     when 'NEWFILE'
       do_new_item :file, *args
+    when 'DIR'
+      do_existing_item :directory, *args
+    when 'FILE'
+      do_existing_item :file, *args
     when 'ALIAS'
       do_alias *args
     when 'PUT'
@@ -112,7 +116,7 @@ private
   def get_item name
     name = resolve_alias(name)
     item = @items[name] or return nil
-    item.fetch_locally(@project_dir)
+    item.fetch_locally
   end
   
   def do_project permalink, name
@@ -165,7 +169,7 @@ private
   
   def do_store data_lines, name, tags, description
     tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
-    store = (@stores[name] ||= RemoteStore.new(name, tags, description))
+    store = (@stores[name] ||= RemoteStore.new(@local_store, name, tags, description))
     data_lines.each do |subcommand, *args|
       args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
       case subcommand.upcase
@@ -194,6 +198,16 @@ private
     tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
     item = @local_store.new_item(kind, name, tags, description)
     puts "new item defined: [#{item.name}]"
+    @items[item.name] = item
+  end
+  
+  def do_existing_item kind, name, tags, store_and_path
+    name = resolve_alias(name)
+    tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
+    store_name, path = store_and_path.split('/')
+    store = @stores[store_name] or raise BuildScriptError, "Store #{store_name} not found"
+    item = store.existing_item(kind, name, tags, '')
+    puts "existing item defined: [#{item.name}]"
     @items[item.name] = item
   end
   

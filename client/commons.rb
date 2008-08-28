@@ -2,7 +2,7 @@
 class Item
 
   # name
-  # fetch_locally storage_dir
+  # fetch_locally
   
 end
 
@@ -20,8 +20,8 @@ class StoreItem < Item
     @description = description
   end
   
-  def fetch_locally local_store
-    return @store.fetch_locally(local_store, self)
+  def fetch_locally
+    return @store.fetch_locally(self)
   end
   
   def has_been_put_into store
@@ -122,7 +122,38 @@ class HttpLocation < Location
   end
   
   def describe_location_of(item)
-    "#{url}/#{item.name}"
+    uri = URI::parse(@url)
+    uri.path = "#{uri.path}/#{item.name}"
+    return uri.to_s
+  end
+  
+  def fetch_locally_into item, local_path
+    raise "Fetching directories via HTTP is not supported" if item.directory?
+
+    uri = URI::parse(@url)
+    uri.path = "#{uri.path}/#{item.name}"
+
+    FileUtils.mkdir_p(File.dirname(local_path))
+    catch(:successfully_done) do
+      response = with_automatic_retries(5) do
+        File.open(local_path, 'wb') do |file|
+          http = Net::HTTP.new(uri.host, uri.port.to_i)
+          http.use_ssl = (uri.scheme == 'https')
+          http.start do
+            http.request_get(uri.request_uri) do |response|
+              next response unless response.code == 200
+              response.read_body do |chunk|
+                file.write(chunk)
+              end
+              throw :successfully_done
+            end
+          end
+        end
+      end
+      File.unlink(local_path)
+      raise "Could not download #{uri}: error #{response.code}" if response
+      raise "Could not download #{uri}"
+    end
   end
   
 end
@@ -143,8 +174,18 @@ class ScpLocation < Location
   end
   
   def put item
-    local_path = item.fetch_locally(nil)
+    local_path = item.fetch_locally
     invoke 'scp', '-r', local_path, "#{@path}/#{item.name}"
+  end
+  
+  def fetch_locally_into item, local_path
+    FileUtils.mkdir_p(File.dirname(local_path))
+    if item.file?
+      invoke 'scp', "#{@path}/#{item.name}", local_path
+    else
+      FileUtils.mkdir_p local_path
+      invoke 'scp', '-r', "#{@path}/#{item.name}", local_path
+    end
   end
   
 end
@@ -172,9 +213,13 @@ class AmazonS3Location < Location
   
   def put item
     raise "cannot upload a directory to S3 (not supported yet, and not needed)" if item.directory?
-    local_path = item.fetch_locally(nil)
+    local_path = item.fetch_locally
     s3 = AmazonS3.new(@access_key, @secret_access_key)
     s3.put_file @bucket, "#{@path}#{item.name}", local_path
+  end
+  
+  def fetch_locally_into item, local_path
+    raise "GETs from Amazon S3 are not supported (please set up an HTTP location for GETs)"
   end
   
 end
@@ -214,7 +259,7 @@ class LocalStore < Store
     @item_stores = {}
   end
   
-  def fetch_locally local_store, item
+  def fetch_locally item
     return path_of(item)
   end
   
@@ -241,17 +286,40 @@ class LocalStore < Store
     (@item_stores[item] ||= []) << store
   end
   
+  def fetch_remote_item item, remote_store
+    path = path_of(item)
+    return path if File.exists?(path)
+    remote_store.fetch_locally_into(item, path)
+  end
+  
 end
 
 class RemoteStore < Store
   
-  def initialize name, tags, description
+  def initialize local_store, name, tags, description
     super(name, tags, description)
+    @local_store = local_store
+  end
+  
+  def item_has_been_put_into item, store
+  end
+  
+  def existing_item kind, name, tags, description
+     item = KINDS[kind].new(self, name, tags, description)
+     return item
   end
   
   def put item
     @locations.first.put item
     item.has_been_put_into self
+  end
+  
+  def fetch_locally item
+    return @local_store.fetch_remote_item(item, self)
+  end
+  
+  def fetch_locally_into item, local_path
+    @locations.last.fetch_locally_into item, local_path
   end
   
 end

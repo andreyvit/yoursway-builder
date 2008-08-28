@@ -2,6 +2,52 @@
 require 'uri'
 require File.join(File.dirname(__FILE__), 's3.rb')
 
+def with_automatic_retries retries_count
+  retries_left = retries_count
+  catch :done do
+    force_retry = false # true to retry even non-500 error codes
+    response = nil
+    exception = nil
+    begin
+      response = yield
+    rescue Errno::EPIPE => e
+      force_retry = true
+      exception = e
+      $stderr.puts "Broken pipe: #{e}" 
+    rescue Errno::ECONNRESET => e
+      force_retry = true
+      exception = e
+      $stderr.puts "Connection reset: #{e}" 
+    rescue Errno::ECONNABORTED => e
+      force_retry = true
+      exception = e
+      $stderr.puts "Connection aborted: #{e}" 
+    rescue Errno::ETIMEDOUT => e
+      force_retry = true
+      exception = e
+      $stderr.puts "Connection timed out: #{e}"
+    rescue Timeout::Error => e
+      force_retry = true
+      exception = e
+      $stderr.puts "Connection timed out: #{e}" 
+    rescue EOFError => e
+      # i THINK this is happening like a connection reset
+      force_retry = true
+      exception = e
+      $stderr.puts "EOF error: #{e}"
+    rescue OpenSSL::SSL::SSLError => e
+      force_retry = true
+      $stderr.puts "SSL error: #{e}"
+    end
+
+    return response if Net::HTTPOK === response
+    return response unless (response && (500...600).include?(response.code.to_i)) or force_retry
+    retries_left -= 1
+    redo if retries_left > 0
+    raise exception, "#{exception.message} (retried #{@retries_count} times)"
+  end
+end
+
 class AmazonS3
   
   attr_writer :retries_count
@@ -19,7 +65,7 @@ class AmazonS3
 
     file_size = File.size(file_path)
     File.open(file_path, 'r') do |file|
-      with_automatic_retries do
+      with_automatic_retries(@retries_count) do
         file.rewind
         http = Net::HTTP.new(uri.host, uri.port.to_i)
         http.use_ssl = (uri.scheme == 'https')
@@ -38,46 +84,6 @@ class AmazonS3
   end
   
 private
-
-  def with_automatic_retries
-    retries_left = @retries_count
-    loop do
-      force_retry = false # true to retry even non-500 error codes
-      response = nil
-      begin
-        response = yield
-      rescue Errno::EPIPE => e
-        force_retry = true
-        $stderr.puts "Broken pipe: #{e}" 
-      rescue Errno::ECONNRESET => e
-        force_retry = true
-        $stderr.puts "Connection reset: #{e}" 
-      rescue Errno::ECONNABORTED => e
-        force_retry = true
-        $stderr.puts "Connection aborted: #{e}" 
-      rescue Errno::ETIMEDOUT => e
-        force_retry = true
-        $stderr.puts "Connection timed out: #{e}"
-      rescue Timeout::Error => e
-        force_retry = true
-        $stderr.puts "Connection timed out: #{e}" 
-      rescue EOFError => e
-        # i THINK this is happening like a connection reset
-        force_retry = true
-        $stderr.puts "EOF error: #{e}"
-      rescue OpenSSL::SSL::SSLError => e
-        force_retry = true
-        $stderr.puts "SSL error: #{e}"
-      end
-
-      break if Net::HTTPOK === response
-      break unless (response && (500...600).include?(response.code.to_i)) or force_retry
-      retries_left -= 1
-      if retries_left <= 0
-        raise "Amazon S3 operation failed, #{@retries_count} retries did not help."
-      end
-    end
-  end
   
   def set_aws_auth_header(request, aws_access_key_id, aws_secret_access_key, bucket='', key='', path_args={})
     # we want to fix the date here if it's not already been done.
