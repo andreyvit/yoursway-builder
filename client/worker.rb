@@ -99,6 +99,8 @@ def try_network_operation
     $stderr.puts "Connection timed out: #{e}"
   rescue Timeout::Error => e
     $stderr.puts "Connection timed out: #{e}" 
+  rescue SocketError => e
+    $stderr.puts "Socket error: #{e}" 
   rescue EOFError => e
     $stderr.puts "EOF error: #{e}"
   end
