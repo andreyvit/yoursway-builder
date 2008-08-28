@@ -15,6 +15,23 @@ from appengine_utilities.flash import Flash
 
 from yslib.dates import time_delta_in_words, delta_to_seconds
 
+from random import choice
+from sets import Set
+
+def create_token(len = 10):
+  result = ''
+  for i in xrange(len):
+    result += choice('abcdefghijklmnoprstuvwxyz0123456789')
+  return result
+  
+def calculate_next_version(latest_build):
+  if latest_build is None:
+    return '0.0.1'
+  else:
+    v = latest_build.version.split('.')
+    v[-1] = str(int(v[-1]) + 1)
+    return ".".join(v)
+
 template_path = os.path.join(os.path.dirname(__file__), 'templates')
 template.register_template_library('myfilters')
 
@@ -54,6 +71,30 @@ class Account(db.Model):
   def urlname(self):
     return self.email
 
+class Builder(db.Model):
+  name = db.StringProperty()
+  created_at = db.DateTimeProperty(auto_now_add = True)
+  last_check_at = db.DateTimeProperty()
+  busy = db.BooleanProperty()
+  progress = db.TextProperty()
+  self_update_requested = db.BooleanProperty(default = False)
+
+  def bind_environment(self, config, now):
+    self._since_last_check = delta_to_seconds(now - self.last_check_at)
+    self._config = config
+
+  def set_message_count(self, count):
+    self._message_count = count
+
+  def message_count(self):
+    return self._message_count
+
+  def since_last_check(self):
+    return self._since_last_check
+
+  def is_online(self):
+    return self._since_last_check < self._config.builder_offline_after
+
 class Project(db.Model):
   name = db.StringProperty()
   permalink = db.StringProperty()
@@ -61,6 +102,8 @@ class Project(db.Model):
   created_at = db.DateTimeProperty(auto_now_add=True)
   is_public = db.BooleanProperty(default = False)
   script = db.TextProperty()
+  continuous_builder = db.ReferenceProperty(Builder, collection_name = 'continuously_built_projects')
+  continuous_token = db.StringProperty()
   
   def validate(self):  
     self.name = self.name.strip()
@@ -77,30 +120,6 @@ class Project(db.Model):
   @staticmethod
   def by_urlname(permalink):
     return Project.all().filter('permalink =', permalink).get()    
-
-class Builder(db.Model):
-  name = db.StringProperty()
-  created_at = db.DateTimeProperty(auto_now_add = True)
-  last_check_at = db.DateTimeProperty()
-  busy = db.BooleanProperty()
-  progress = db.TextProperty()
-  self_update_requested = db.BooleanProperty(default = False)
-  
-  def bind_environment(self, config, now):
-    self._since_last_check = delta_to_seconds(now - self.last_check_at)
-    self._config = config
-    
-  def set_message_count(self, count):
-    self._message_count = count
-    
-  def message_count(self):
-    return self._message_count
-  
-  def since_last_check(self):
-    return self._since_last_check
-  
-  def is_online(self):
-    return self._since_last_check < self._config.builder_offline_after
     
 def split_tags(s):
   if s == '-':
@@ -268,7 +287,8 @@ class BaseHandler(webapp.RequestHandler):
           flash = "Please review the default configuration before the first use")
       else:
         self.config = InstallationConfig()
-    self.data.update(config = self.config, server_name = self.config.server_name)
+    self.data.update(config = self.config, server_name = self.config.server_name,
+      server_host = self.request.host)
         
   def read_user(self):
     self.user = users.get_current_user()
@@ -313,8 +333,8 @@ class BaseHandler(webapp.RequestHandler):
     self.response.out.write(template.render(os.path.join(template_path, *path_components), self.data))
     raise FinishRequest
     
-  def access_denied(self, message = None):
-    if self.user == None and self.request.method == 'GET':
+  def access_denied(self, message = None, attemp_login = True):
+    if attemp_login and self.user == None and self.request.method == 'GET':
       self.redirect_and_finish(users.create_login_url(self.request.uri))
     self.die(403, 'access_denied.html', message=message)
 
@@ -333,6 +353,8 @@ class BaseHandler(webapp.RequestHandler):
     
   def fetch_active_builders(self):
     result = Builder.all().filter('last_check_at > ', (self.now - timedelta(seconds=self.config.builder_is_recent_within))).fetch(20)
+    for builder in result:
+      builder.bind_environment(self.config, self.now)
     for builder in result:
       count = builder.messages.filter('state =', 0).count(limit = 10)
       logging.info("count for builder %s: %d" % (builder.name, count))
@@ -388,6 +410,16 @@ class BaseHandler(webapp.RequestHandler):
         self.not_found("No user account exists for email address “%s”" % person_component)
     self.data.update(person = self.person)
     
+  def start_build(self, version, builder):
+    build = Build(project = self.project, version = version, builder = builder, created_by = self.user,
+      state = BUILD_INPROGRESS)
+    build.put()
+
+    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, self.project.permalink, self.project.name, self.project.script)
+
+    message = Message(builder = builder, build = build, body = body)
+    message.put()
+    
 class ProjectsHandler(BaseHandler):
   @prolog(fetch = ['projects'])
   def get(self):
@@ -409,6 +441,10 @@ class CreateEditProjectHandler(BaseHandler):
     self.project.name = self.request.get('project_name')
     self.project.script = self.request.get('project_script')
     self.project.permalink = self.request.get('project_permalink')
+    self.project.continuous_builder = Builder.all().filter('name =', self.request.get('project_continuous_builder')).get()
+    
+    if self.project.continuous_token == None:
+      self.project.continuous_token = create_token()
 
     errors = self.project.validate()
     if len(errors) == 0:
@@ -418,8 +454,22 @@ class CreateEditProjectHandler(BaseHandler):
       self.render_editor(errors)          
 
   def render_editor(self, errors = dict()):
-    self.data.update(errors = errors, edit = self.project.is_saved())
+    builders = self.fetch_active_builders()
+    self.data.update(errors = errors, edit = self.project.is_saved(), builders = builders)
     self.render_and_finish('project', 'editor.html')
+    
+    # used_repositories = self._calculate_used_repositories(self.project.script)
+  def _calculate_used_repositories(script):
+    used_repositories = []
+    for line in script.split("\n"):
+      if len(line) == 0 or line[0:1] == '#':
+        continue
+      cmd, args = (line + "\t").split("\t", 1)
+      if cmd == 'VERSION':
+        xx, repos_name, rem = (args + "\t\t").split("\t", 2)
+        if len(repos_name) > 0:
+          used_repositories.append(repos_name)
+    return list(Set(used_repositories))
 
 class PeopleHandler(BaseHandler):
   @prolog(fetch = ['people'], required_level = ADMIN_LEVEL)
@@ -476,8 +526,6 @@ class ProjectHandler(BaseHandler):
   def get(self, project_key):
     if self.effective_level > VIEWER_LEVEL:
       builders = self.fetch_active_builders()
-      for builder in builders:
-        builder.bind_environment(self.config, self.now)
       online_builders = [b for b in builders if b.is_online()]
       recent_builders = [b for b in builders if not b.is_online()]
       self.data.update(online_builders = online_builders, recent_builders = recent_builders,
@@ -496,12 +544,7 @@ class ProjectHandler(BaseHandler):
     for build in latest_builds:
       build.calculate_derived_data()
 
-    # calculate next version
-    next_version = '0.0.1'
-    if len(builds) > 0:
-      v = builds[0].version.split('.')
-      v[-1] = str(int(v[-1]) + 1)
-      next_version = ".".join(v)
+    next_version = calculate_next_version(builds[0] if builds else None)
     
     self.data.update(
       latest_builds = latest_builds,
@@ -534,17 +577,39 @@ class BuildProjectHandler(BaseHandler):
       self.redirect_and_finish('/projects/%s' % self.project.urlname(),
         flash = "Version %s already exists. Please pick another." % version)
       
-    build = Build(project = self.project, version = version, builder = self.builder, created_by = self.user,
-      state = BUILD_INPROGRESS)
-    build.put()
-
-    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, self.project.permalink, self.project.name, self.project.script)
-    
-    message = Message(builder = self.builder, build = build, body = body)
-    message.put()
+    self.start_build(version, self.builder)
     
     self.redirect_and_finish('/projects/%s' % self.project.urlname(),
       flash = "Started bulding version %s. Please refresh this page to track status." % version)
+
+class StartContinuousBuildProjectHandler(BaseHandler):
+  @prolog(path_components = ['project'])
+  def post(self, project_key):
+    token = self.request.get('token')
+    logging.info('token is %s' % token)
+    if token != self.project.continuous_token:
+      self.access_denied("Invalid token", attemp_login = False)
+      
+    builder = self.project.continuous_builder
+    logging.info('token ok; builder is %s' % builder)
+    if builder == None:
+      self.not_found("Continuous builds are disabled for this project")
+
+    latest_build = self.project.builds.order('-created_at').get()
+    version = calculate_next_version(latest_build)
+    logging.info('builder ok; version is %s' % version)
+
+    existing_count = self.project.builds.filter('version =', version).count()
+    if existing_count > 0:
+      logging.info("Ignoring build request with the same version number (%s, project %s)" % (version, self.project.name))
+      self.error(400)
+      return
+
+    self.start_build(version, builder)
+
+    self.response.out.write("OK\t%s" % version)
+    
+  get = post
 
 class SelfUpdateRequestHandler(BaseHandler):
   
@@ -679,6 +744,7 @@ url_mapping = [
   ('/projects/([^/]*)/edit', CreateEditProjectHandler),
   ('/projects/([^/]*)/delete', DeleteProjectHandler),
   ('/projects/([^/]*)/build', BuildProjectHandler),
+  ('/projects/([^/]*)/start_continuous_build', StartContinuousBuildProjectHandler),
   ('/projects/([^/]*)/builds/([^/]*)', ProjectBuildHandler),
   
   ('/builders/([^/]*)/obtain-work', BuilderObtainWorkHandler),

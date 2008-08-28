@@ -18,6 +18,14 @@
   <input type="text" name="project_permalink" size="60" value="{{ project.permalink }}"></p>
   {% if errors.permalink %}<div class="error">Error: {{ errors.permalink }}</div>{% endif %}
 
+	<p>Builder to use for continuous builds:<br>
+	<select name="project_continuous_builder">
+		<option value="<none>" {% if not project.continuous_builder %}selected="selected"{% endif %}>(disable autobuilds)</option>
+		{% for builder in builders %}
+			<option value="{{ builder.name }}" {% ifequal project.continuous_builder.name builder.name %}selected="selected"{% endifequal %}>{{ builder.name }}</option>
+		{% endfor %}
+	</select>
+
   <p>Script:<br>
   <textarea name="project_script" cols="60" rows="20">{{ project.script }}</textarea>
   </p>
@@ -28,6 +36,21 @@
   <p><input type="submit" value="Create Project"> or <a class="nav" href="/projects">Cancel</a></p>
 {% endif %}
 </form>
+
+{% if project.is_saved %}
+	<h2>Continuous / nightly builds</h2>
+
+	{% if not project.continuous_builder %}
+		<p>Please choose a builder to use for continuous builds. Until you do that automatic builds will be disabled.</p>
+	{% else %}
+		<p>You can trigger building of this project by sending HTTP GET or POST to the following URL:</p>
+		<div style="text-align: center; margin: 5px auto; padding: 6px; border: 1px dotted black;">
+			http://{{ server_host }}/projects/{{ project.urlname }}/start_continuous_build?token={{ project.continuous_token }}
+		</div>
+
+		<p>A build will be initiated with default options (as if you clicked Build on the project page without changing anything).</p>
+	{% endif %}
+{% endif %}
 
 {% if edit %}
 <hr>
