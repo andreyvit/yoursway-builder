@@ -144,13 +144,14 @@ while not interrupted
           until other_lines.empty?
             line = other_lines.shift.chomp
             next if line.strip.empty?
-            next if line =~ /^#/
+            next if line =~ /^\s*#/
         
             command, *args = line.split("\t")
             data = []
             until other_lines.empty?
               line = other_lines.shift.chomp
               next if line.strip.empty?
+              next if line =~ /^\s*#/
               if line[0..0] == "\t"
                 data << line[1..-1].split("\t")
               else
