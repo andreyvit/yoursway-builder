@@ -49,7 +49,9 @@ class Executor
     when 'SET'
       do_set *args
     when 'INVOKE'
-      do_invoke *args
+      do_invoke data_lines, *args
+    when 'INVOKERUBY'
+      do_invoke_ruby data_lines, *args
     when 'GITREPOS'
       do_gitrepos data_lines, *args
     when 'STORE'
@@ -129,11 +131,16 @@ private
     @variables[name] = value
   end
   
-  def do_invoke app, *args
+  def do_invoke data_lines, app, *args
     for name, value in @variables
       ENV[name] = value
     end
     invoke(app, *args)
+  end
+  
+  def do_invoke_ruby data_lines, *args
+    # might have more logic in the future
+    do_invoke data_lines, 'ruby', *args
   end
   
   def do_gitrepos data_lines, name
