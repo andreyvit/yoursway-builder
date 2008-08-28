@@ -131,10 +131,12 @@ BUILD_ABANDONED = 0
 BUILD_SUCCEEDED = 1
 BUILD_FAILED = 2
 BUILD_INPROGRESS = 3
+BUILD_QUEUED = 4
     
 state_info = {
   BUILD_ABANDONED:  dict(name = 'abandoned',  color = 'grey'),
   BUILD_INPROGRESS: dict(name = 'inprogress', color = 'blue'),
+  BUILD_QUEUED:     dict(name = 'queued',     color = 'blue'),
   BUILD_FAILED:     dict(name = 'failed',     color = 'red'),
   BUILD_SUCCEEDED:    dict(name = 'succeeded',  color = 'green'),
 }
@@ -142,7 +144,7 @@ state_info = {
 class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   builder = db.ReferenceProperty(Builder, collection_name = 'builds')
-  state = db.IntegerProperty(default = BUILD_ABANDONED, choices = [BUILD_INPROGRESS, BUILD_SUCCEEDED, BUILD_FAILED, BUILD_ABANDONED])
+  state = db.IntegerProperty(default = BUILD_ABANDONED, choices = [BUILD_INPROGRESS, BUILD_QUEUED, BUILD_SUCCEEDED, BUILD_FAILED, BUILD_ABANDONED])
   version = db.StringProperty()
   report = db.TextProperty(default = '')
   failure_reason = db.TextProperty(default = '')
@@ -412,7 +414,7 @@ class BaseHandler(webapp.RequestHandler):
     
   def start_build(self, version, builder):
     build = Build(project = self.project, version = version, builder = builder, created_by = self.user,
-      state = BUILD_INPROGRESS)
+      state = BUILD_QUEUED)
     build.put()
 
     body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, self.project.permalink, self.project.name, self.project.script)
@@ -663,6 +665,9 @@ class BuilderObtainWorkHandler(BaseHandler):
     else:
       message.state = 1
       message.put()
+      build = message.build
+      build.state = BUILD_INPROGRESS
+      build.put()
       self.builder.busy = True
       body = "ENVELOPE\tv1\t%s\n%s" % (message.key(), message.body)
       self.response.out.write(body)

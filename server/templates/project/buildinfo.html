@@ -4,11 +4,12 @@
 
 {% block content %}
 
-<h1>Build <span style="color: {{build.state_color}}">{{ build.version }}</span>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %} of {{ project.name }}</h1>       
+<h1>Build <span style="color: {{build.state_color}}">{{ build.version }}</span>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'queued' %} <span style="">(waiting for builder){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %} of {{ project.name }}</h1>       
 
 <p><a class="nav" href="/projects/{{ project.urlname }}">« Go back to the project</a></p>
 
 <p>
+  {% ifequal build.state_name 'queued' %}<b style="color: blue;">Queued,</b> waiting for builder… start was{% endifequal %}
   {% ifequal build.state_name 'inprogress' %}<img src="/images/indicator.gif" width="16" height="16"> Building… start was {% endifequal %}
   {% ifequal build.state_name 'abandoned' %}Never finished. Start was{% endifequal %}
   {% ifequal build.state_name 'failed' %}<b style="color: red;">Failed.</b> Start was{% endifequal %}
