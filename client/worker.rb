@@ -18,12 +18,13 @@ require 'optparse'
 
 class Config
   attr_accessor :server_host, :builder_name
-  attr_accessor :poll_interval
+  attr_accessor :poll_interval, :poll_interval_overriden
 end
 config = Config.new
 config.server_host = "localhost:8080"
 config.builder_name = `hostname`.strip.gsub(/\..*$/, '')
 config.poll_interval = 59 # a default, will be overridden from the server
+config.poll_interval_overriden = false
 
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby worker.rb [options]"
@@ -36,8 +37,13 @@ OptionParser.new do |opts|
     config.builder_name = opt
   end
 
-  opts.on_tail("--default-poll", Integer, "default poll interval (will be overriden from the server, so only if the server is not reached)") do |val|
+  opts.on_tail("--default-poll SECONDS", Integer, "default poll interval (used only if the server is not reachable)") do |val|
     config.poll_interval = val
+  end
+
+  opts.on_tail("--poll SECONDS", Integer, "override poll interval (ignore the interval set by the server)") do |val|
+    config.poll_interval = val
+    config.poll_interval_overriden = true
   end
 
   opts.on_tail("-U", "Allow self-updating (git fetch, git reset --hard)") do
@@ -121,7 +127,7 @@ while not interrupted
       if proto_ver == 'v1'
         if command == 'IDLE'
           new_interval = [60*20, args[1].to_i].min
-          if new_interval >= 10 && config.poll_interval != new_interval
+          if !config.poll_interval_overriden && new_interval >= 10 && config.poll_interval != new_interval
             config.poll_interval = new_interval
             log "Poll interval set to #{config.poll_interval}"
           end
