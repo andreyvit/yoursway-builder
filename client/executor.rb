@@ -135,6 +135,11 @@ private
     for name, value in @variables
       ENV[name] = value
     end
+    data_lines.each do |subcommand, *subargs|
+      case subcommand.upcase
+      when 'ARG', 'ARGS' then args.push(*subargs)
+      end
+    end
     invoke(app, *args)
   end
   
