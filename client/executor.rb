@@ -23,6 +23,9 @@ class String
   
 end
 
+class BuildScriptError < StandardError
+end
+
 class Executor
   
   def initialize builder_name
@@ -67,7 +70,7 @@ class Executor
     when 'PUT'
       do_put *args
     else
-      log "Unknown command #{command}(#{args.join(', ')})"
+      raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
     end
   end
   
@@ -154,6 +157,8 @@ private
       case subcommand.upcase
       when 'GIT'
         repos.add_location GitLocation.new(*args)
+      else
+        raise BuildScriptError, "Unknown repository location type #{subcommand}"
       end
     end
   end
@@ -170,6 +175,8 @@ private
         store.add_location! HttpLocation.new(*args)
       when 'S3'
         store.add_location! AmazonS3Location.new(*args)
+      else
+        raise BuildScriptError, "Unknown store location type #{subcommand}"
       end
     end
   end
