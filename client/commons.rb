@@ -1,5 +1,9 @@
 
 class Item
+  
+  def in_local_store?
+    false
+  end
 
   # name
   # fetch_locally
@@ -7,10 +11,6 @@ class Item
 end
 
 class RepositoryItem < Item
-  
-  def in_local_store?
-    false
-  end
 
 end
 
