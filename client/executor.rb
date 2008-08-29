@@ -137,17 +137,23 @@ private
   
   def subst value
     loop do
-      result = value.gsub(/\[([^\[\]]+)\]/) { |var|
-        @variables[$1] or get_item($1) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
+      result = value.gsub(/\[([^\[\]<]+)(?:<([^>]*)>)?\]/) { |var|
+        tags = parse_tags($2)
+        @variables[$1] or get_item($1, tags) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
       }
       return result if result == value
       value = result
     end
   end
   
-  def get_item name
+  def get_item name, tags
     name = resolve_alias(name)
     item = @items[name] or return nil
+    if item.in_local_store? && !item.used?
+      item.bring_parent_to_life!
+      item.obliterate_completely! unless tags.include?('keep')
+      item.bring_me_to_life! if tags.include?('mkdir')
+    end
     item.fetch_locally
   end
   
@@ -227,7 +233,7 @@ private
   
   def do_new_item kind, name, tags, description
     name = resolve_alias(name)
-    tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
+    tags = parse_tags(tags)
     item = @local_store.new_item(kind, name, tags, description)
     puts "new item defined: [#{item.name}]"
     @items[item.name] = item
@@ -314,6 +320,11 @@ private
   
   def resolve_alias name
     @aliases[name] || name
+  end
+  
+  def parse_tags tags_str
+    tags_str = (tags_str || '').strip
+    return case tags_str when '', '-' then [] else tags_str.split(/\s*,\s*/) end
   end
   
 end

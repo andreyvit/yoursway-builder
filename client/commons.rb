@@ -7,6 +7,34 @@ class Item
 end
 
 class RepositoryItem < Item
+  
+  def in_local_store?
+    false
+  end
+
+end
+
+module LocalItem
+  
+  def obliterate_completely!
+    path = @store.fetch_locally(self)
+    FileUtils.rm_rf path
+  end
+  
+  def bring_parent_to_life!
+    path = @store.fetch_locally(self)
+    FileUtils.mkdir_p File.dirname(path)
+  end
+  
+  def bring_me_to_life!
+    path = @store.fetch_locally(self)
+    initialize_new_location path
+  end
+  
+  def in_local_store?
+    true
+  end
+  
 end
 
 class StoreItem < Item
@@ -18,10 +46,16 @@ class StoreItem < Item
     @name = name
     @tags = tags
     @description = description
+    @used = false
   end
   
   def fetch_locally
+    @used = true
     return @store.fetch_locally(self)
+  end
+  
+  def used?
+    @used
   end
   
   def has_been_put_into store
@@ -277,6 +311,7 @@ class LocalStore < Store
   
   def new_item kind, name, tags, description
      item = KINDS[kind].new(self, name, tags, description)
+     item.extend LocalItem
      item.initialize_new_location path_of(item)
      item.has_been_put_into self
      return item
@@ -290,6 +325,10 @@ class LocalStore < Store
     path = path_of(item)
     return path if File.exists?(path)
     remote_store.fetch_locally_into(item, path)
+  end
+  
+  def local?
+    true
   end
   
 end
@@ -320,6 +359,10 @@ class RemoteStore < Store
   
   def fetch_locally_into item, local_path
     @locations.last.fetch_locally_into item, local_path
+  end
+  
+  def local?
+    false
   end
   
 end
