@@ -15,6 +15,20 @@ def invoke cmd, *args
   end
 end
 
+def mv_merge src, dst
+  if File.directory?(src) && File.directory?(dst)
+    Dir.open(src) do |dir|
+      while entry = dir.read
+        next if entry == '.' or entry == '..'
+        mv_merge "#{src}/#{entry}", "#{dst}/#{entry}"
+      end
+    end
+  else
+    FileUtils.mkdir_p File.dirname(dst)
+    FileUtils.mv src, dst
+  end
+end
+
 class String
   
   def subst_empty default_value
@@ -73,6 +87,8 @@ class Executor
       do_alias *args
     when 'PUT'
       do_put *args
+    when 'UNZIP'
+      do_unzip data_lines, *args
     else
       raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -223,6 +239,46 @@ private
       log "PUT of #{item.name} into #{store.name}..."
       store.put item
     end
+  end
+  
+  def do_unzip data_lines, src_file, dst_dir
+    specs = []
+    data_lines.each do |subcommand, *args|
+      case subcommand.upcase
+      when 'INTO' 
+        dst, src = *args
+        raise BuildScriptError, "INTO syntax error" if dst.nil? or src.nil?
+        specs << [dst, src]
+      else raise BuildScriptError, "Unknown UNZIP subcommand #{subcommand}"
+      end
+    end
+    
+    tmp_dir = "#{dst_dir}/.xtmp"
+    FileUtils.mkdir_p tmp_dir
+    FileUtils.cd tmp_dir do
+      case src_file
+      when /\.zip$/
+        invoke 'unzip', '-x', src_file
+      when /\.tar$/
+        invoke 'tar', 'xf', src_file
+      when /\.tar\.bz2$/
+        invoke 'tar', 'xjf', src_file
+      when /\.tar\.gz$/, /\.tgz$/
+        invoke 'tar', 'xzf', src_file
+      else
+        raise "Don't know how to extract #{src_file}"
+      end
+    end
+    specs.each do |dst_suffix, src_suffix|
+      src_suffix = src_suffix[1..-1] if src_suffix[0..0] == '/'
+      dst_suffix = dst_suffix[1..-1] if dst_suffix[0..0] == '/'
+      src = "#{tmp_dir}/#{src_suffix}"
+      dst = "#{dst_dir}/#{dst_suffix}"
+      raise "#{src_suffix} does not exist in #{src_file}" unless File.exists? src
+      raise "#{src_suffix} is a file, but #{dst_suffix} is already a directory when unzipping #{src_file}" if File.file?(src) && File.directory?(dst)
+      mv_merge src, dst
+    end
+    FileUtils.rm_rf(tmp_dir)
   end
   
   def resolve_alias name
