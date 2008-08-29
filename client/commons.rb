@@ -325,6 +325,7 @@ class LocalStore < Store
     path = path_of(item)
     return path if File.exists?(path)
     remote_store.fetch_locally_into(item, path)
+    return path
   end
   
   def local?
