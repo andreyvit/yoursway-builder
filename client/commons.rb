@@ -175,7 +175,7 @@ class HttpLocation < Location
           http.use_ssl = (uri.scheme == 'https')
           http.start do
             http.request_get(uri.request_uri) do |response|
-              next response unless response.code == 200
+              next response unless Net::HTTPOK === response
               response.read_body do |chunk|
                 file.write(chunk)
               end
