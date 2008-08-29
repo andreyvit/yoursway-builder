@@ -172,7 +172,7 @@ private
   end
   
   def do_gitrepos data_lines, name
-    repos = (@repositories[name] ||= GitRepository.new(name))
+    repos = (@repositories[name] ||= GitRepository.new(@project_dir, name))
     data_lines.each do |subcommand, *args|
       case subcommand.upcase
       when 'GIT'
