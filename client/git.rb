@@ -59,6 +59,7 @@ end
 class GitRepository
   
   attr_reader :name
+  attr_reader :locations
   
   def initialize project_dir, name
     @project_dir = project_dir
@@ -75,6 +76,17 @@ class GitRepository
     GitItem.new(self, name, parse_version(*spec))
   end
   
+  def fetch_version(item)
+    folder = File.join(@project_dir, @name)
+    prefetch_locally folder
+    FileUtils.cd(folder) do
+      invoke('git', 'reset', '--hard', item.version.ref_name(@definitive_location.name))
+    end
+    return folder
+  end
+
+private
+  
   def prefetch_locally(folder)
     return if @prefetched
     @prefetched = true
@@ -90,17 +102,6 @@ class GitRepository
     @definitive_location = locations.last
   end
   
-  def fetch_version(item)
-    folder = File.join(@project_dir, @name)
-    prefetch_locally folder
-    FileUtils.cd(folder) do
-      invoke('git', 'reset', '--hard', item.version.ref_name(@definitive_location.name))
-    end
-    return folder
-  end
-
-private
-  
   def parse_version spec
     case spec
     when %r!^heads/! then GitBranchVersion.new($')
@@ -109,4 +110,26 @@ private
     end
   end
 
+end
+
+class LocalPseudoVersion
+end
+
+class LocalPseudoRepository
+  
+  attr_reader :name
+  
+  def initialize local_dir, name
+    @name = name
+    @local_dir = local_dir
+  end
+  
+  def create_item name, *spec
+    GitItem.new(self, name, LocalPseudoVersion.new)
+  end
+
+  def fetch_version(item)
+    @local_dir
+  end
+  
 end

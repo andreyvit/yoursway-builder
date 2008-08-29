@@ -54,6 +54,23 @@ end
 class BuildScriptError < StandardError
 end
 
+class RepositoryOverride
+  
+  attr_reader :local_dir
+  
+  def initialize repos_kind, repos, branch, local_dir
+    @repos_kind = repos_kind
+    @repos = repos
+    @branch = branch
+    @local_dir = local_dir
+  end
+  
+  def matches? repos
+    !! repos.locations.find { |loc| loc.url == @repos }
+  end
+  
+end
+
 class Executor
   
   def initialize builder_name
@@ -64,6 +81,7 @@ class Executor
     @items = {}
     @aliases = {}
     @storage_dir = '/tmp/storage'
+    load_alternates_file
   end
   
   def execute command, args, data_lines
@@ -136,6 +154,19 @@ class Executor
   end
   
 private
+
+  def load_alternates_file
+    @overrides = []
+    file_name = File.expand_path("~/.ysbuilder_overrides")
+    begin
+      File.read(file_name).split("\n").each do |line|
+        next if line =~ /^\s*(#|$)/
+        repos_kind, repos, branch, alt = line.split("\t")
+        @overrides << RepositoryOverride.new(repos_kind, repos, branch, File.expand_path(alt))
+      end
+    rescue SystemCallError
+    end
+  end
   
   def subst value
     loop do
@@ -204,6 +235,9 @@ private
       else
         raise BuildScriptError, "Unknown repository location type #{subcommand}"
       end
+    end
+    if override = @overrides.find { |o| o.matches? repos }
+      @repositories[name] = LocalPseudoRepository.new(override.local_dir, repos.name)
     end
   end
   
