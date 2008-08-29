@@ -105,6 +105,8 @@ class Executor
       do_unzip data_lines, *args
     when 'COPYTO'
       do_copyto data_lines, *args
+    when 'FIXPLIST'
+      do_fix_plist data_lines, *args
     else
       raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -316,6 +318,19 @@ private
         raise BuildScriptError, "Unknown COPYTO subcommand: #{subcommand}"
       end
     end
+  end
+  
+  def do_fix_plist data_lines, file
+    lines = File.read(file).split("\n")
+    data_lines.each do |subcommand, header, value|
+      case subcommand
+      when 'FIX'
+        lines.each { |$_| gsub!(/<string>([^<]+)<\/string>/) { "<string>#{value}</string>" } if ($_ =~ /<key>#{header}<\/key>/) ... (/<key>/) }
+      else
+        raise "Unknown FIXPLIST subcommand: #{subcommand}"
+      end
+    end
+    File.open(file, 'w') { |f| f.write(lines.join("\n")) }
   end
   
   def resolve_alias name
