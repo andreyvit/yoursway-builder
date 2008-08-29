@@ -29,6 +29,20 @@ def mv_merge src, dst
   end
 end
 
+def cp_merge src, dst
+  if File.directory?(src) && File.directory?(dst)
+    Dir.open(src) do |dir|
+      while entry = dir.read
+        next if entry == '.' or entry == '..'
+        cp_merge "#{src}/#{entry}", "#{dst}/#{entry}"
+      end
+    end
+  else
+    FileUtils.mkdir_p File.dirname(dst)
+    FileUtils.cp_r src, dst
+  end
+end
+
 class String
   
   def subst_empty default_value
@@ -89,6 +103,8 @@ class Executor
       do_put *args
     when 'UNZIP'
       do_unzip data_lines, *args
+    when 'COPYTO'
+      do_copyto data_lines, *args
     else
       raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -279,6 +295,21 @@ private
       mv_merge src, dst
     end
     FileUtils.rm_rf(tmp_dir)
+  end
+  
+  def do_copyto data_lines, destination_dir
+    data_lines.each do |subcommand, *subargs|
+      case subcommand
+      when 'INTO'
+        dest_suffix, src = *subargs
+        dest = File.join(destination_dir, dest_suffix)
+        raise "#{src} does not exist (in COPYTO)" unless File.exists? src
+        raise "#{src} is a file, but #{dest} is already a directory (in COPYTO)" if File.file?(src) && File.directory?(dest)
+        cp_merge src, dest
+      else
+        raise BuildScriptError, "Unknown COPYTO subcommand: #{subcommand}"
+      end
+    end
   end
   
   def resolve_alias name
