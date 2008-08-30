@@ -43,8 +43,7 @@ def cp_merge src, dst
   end
 end
 
-def list_entries(path)
-  result = []
+def list_entries(path, result = [])
   Dir.open(path) do |dir|
     while entry = dir.read
       next if entry == '.' or entry == '..'
@@ -54,10 +53,40 @@ def list_entries(path)
   return result
 end
 
+def list_entries_recursively(path, result = [])
+  Dir.open(path) do |dir|
+    while entry = dir.read
+      next if entry == '.' or entry == '..'
+      child = File.join(path, entry)
+      result << child
+      list_entries_recursively child, result if File.directory? child
+    end
+  end
+  return result
+end
+
 class String
   
   def subst_empty default_value
     if self.empty? then default_value else self end
+  end
+  
+  def starts_with? prefix
+    self[0..prefix.length-1] == prefix
+  end
+  
+  def ends_with? suffix
+    self[-suffix.length..-1] == suffix
+  end
+  
+  def drop_prefix_or_fail prefix
+    return self[prefix.length..-1] if self.starts_with? prefix
+    raise "'#{self}' does not start with '#{prefix}'"
+  end
+  
+  def drop_suffix_or_fail suffix
+    return self[0..-suffix.length-1] if self.ends_with? suffix
+    raise "'#{self}' does not end with '#{suffix}'"
   end
   
 end
@@ -138,6 +167,10 @@ class Executor
       do_copyto data_lines, *args
     when 'FIXPLIST'
       do_fix_plist data_lines, *args
+    when 'SUBSTVARS'
+      do_subst_vars data_lines, *args
+    when 'NSIS-FILE-LIST'
+      do_nsis_file_list *args
     else
       raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -181,11 +214,11 @@ private
     end
   end
   
-  def subst value
+  def subst value, additional_variables = {}
     loop do
       result = value.gsub(/\[([^\[\]<]+)(?:<([^>]*)>)?\]/) { |var|
         tags = parse_tags($2)
-        @variables[$1] or get_item($1, tags) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
+        additional_variables[$1] or @variables[$1] or get_item($1, tags) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
       }
       return result if result == value
       value = result
@@ -430,6 +463,51 @@ private
       end
     end
     File.open(file, 'w') { |f| f.write(lines.join("\n")) }
+  end
+  
+  def do_subst_vars data_lines, file
+    additional_variables = {}
+    data_lines.each do |subcommand, key, value|
+      case subcommand
+      when 'SET'
+        additional_variables[key] = subst(value, additional_variables)
+      else
+        raise "Unknown SUBSTVARS subcommand: #{subcommand}"
+      end
+    end
+    data = File.read(file)
+    data = subst(data, additional_variables)
+    File.open(file, 'w') { |f| f.write data}
+  end
+  
+  def do_nsis_file_list source_dir, inst_file, uninst_file
+    files = list_entries_recursively(source_dir)
+    common_prefix = File.join(source_dir, 'x')[0..-2] # a trick to add a trailing slash
+    last_dir = source_dir = common_prefix[0..-2] # without a slash
+    File.open(inst_file, 'w') do |instf|
+      for file in files.sort
+        next unless File.file? file
+        dir = File.dirname(file)
+        if dir != last_dir
+          last_dir = dir
+          rel_dir = "$INSTDIR" + ("\\" + dir.drop_prefix_or_fail(common_prefix) rescue "").gsub('/', '\\').gsub('$', '$$')
+          instf.puts %Q!SetOutPath "#{rel_dir}"!
+        end
+        instf.puts %Q!File "#{file}"!
+      end
+    end 
+    File.open(uninst_file, 'w') do |uninstf|
+      for file in files
+        next unless File.file? file
+        rel_file = file.drop_prefix_or_fail(common_prefix).gsub('/', '\\').gsub('$', '$$')
+        uninstf.puts %Q!Delete "$INSTDIR\\#{rel_file}"!
+      end
+      for dir in files
+        next unless File.directory? dir
+        rel_dir = dir.drop_prefix_or_fail(common_prefix).gsub('/', '\\').gsub('$', '$$')
+        uninstf.puts %Q!RmDir "$INSTDIR\\#{rel_dir}"!
+      end
+    end
   end
   
   def resolve_alias name
