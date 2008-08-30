@@ -10,6 +10,9 @@
   <p>Show builders that have been online within <input type="text" name="builder_is_recent_within" value="{{ config.builder_is_recent_within }}" size="7"> seconds.</p>
   <p>Show details of <input type="text" name="num_latest_builds" value="{{ config.num_latest_builds }}" size="5"> latest builds on the project page. Additionally, show summary of <input type="text" name="num_recent_builds" value="{{ config.num_recent_builds }}" size="5"> latest builds.</p>
   <p>A build is considered abandoned after <input type="text" name="build_abandoned_after" value="{{ config.build_abandoned_after }}" size="7"> seconds, or after its builder declares itself idle.</p>
+  <p>Common script fragment:<br>
+  <textarea name="common_script" cols="80" rows="25">{{ common_script }}</textarea>
+  </p>
 
   <p>
 	<input type="submit" value="Save Configuration">

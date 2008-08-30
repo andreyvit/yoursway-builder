@@ -43,6 +43,7 @@ class InstallationConfig(db.Model):
   build_abandoned_after = db.IntegerProperty(default = 60*60)
   num_latest_builds = db.IntegerProperty(default = 3)
   num_recent_builds = db.IntegerProperty(default = 30)
+  common_script = db.TextProperty(default = '')
 
 config_query = InstallationConfig.gql("LIMIT 1")
 
@@ -422,7 +423,8 @@ class BaseHandler(webapp.RequestHandler):
       state = BUILD_QUEUED)
     build.put()
 
-    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s" % (version, self.project.permalink, self.project.name, self.project.script)
+    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s\n%s" % (version, self.project.permalink, self.project.name,
+      self.config.common_script, self.project.script)
 
     message = Message(builder = builder, build = build, body = body)
     message.put()
@@ -733,6 +735,7 @@ class ServerConfigHandler(BaseHandler):
     self.config.num_latest_builds = int(self.request.get('num_latest_builds'))
     self.config.num_recent_builds = int(self.request.get('num_recent_builds'))
     self.config.build_abandoned_after = int(self.request.get('build_abandoned_after'))
+    self.config.common_script = self.request.get('common_script')
     if len(self.config.server_name) == 0:
       self.show_editor()
       
