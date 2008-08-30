@@ -97,12 +97,12 @@ class Builder(db.Model):
     return self._since_last_check < self._config.builder_offline_after
 
 class Project(db.Model):
-  name = db.StringProperty()
-  permalink = db.StringProperty()
+  name = db.StringProperty(default = '')
+  permalink = db.StringProperty(default = '')
   owner = db.UserProperty()
   created_at = db.DateTimeProperty(auto_now_add=True)
   is_public = db.BooleanProperty(default = False)
-  script = db.TextProperty()
+  script = db.TextProperty(default = '')
   continuous_builder = db.ReferenceProperty(Builder, collection_name = 'continuously_built_projects')
   continuous_token = db.StringProperty()
   
