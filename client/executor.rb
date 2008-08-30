@@ -43,6 +43,17 @@ def cp_merge src, dst
   end
 end
 
+def list_entries(path)
+  result = []
+  Dir.open(path) do |dir|
+    while entry = dir.read
+      next if entry == '.' or entry == '..'
+      result << entry
+    end
+  end
+  return result
+end
+
 class String
   
   def subst_empty default_value
@@ -119,6 +130,8 @@ class Executor
       do_alias *args
     when 'PUT'
       do_put *args
+    when 'ZIP'
+      do_zip data_lines, *args
     when 'UNZIP'
       do_unzip data_lines, *args
     when 'COPYTO'
@@ -341,6 +354,45 @@ private
       raise "#{src_suffix} does not exist in #{src_file}" unless File.exists? src
       raise "#{src_suffix} is a file, but #{dst_suffix} is already a directory when unzipping #{src_file}" if File.file?(src) && File.directory?(dst)
       mv_merge src, dst
+    end
+    FileUtils.rm_rf(tmp_dir)
+  end
+  
+  def do_zip data_lines, dst_file
+    specs = []
+    data_lines.each do |subcommand, *args|
+      case subcommand.upcase
+      when 'INTO' 
+        dst, src = *args
+        raise BuildScriptError, "INTO syntax error" if dst.nil? or src.nil?
+        specs << [dst, src]
+      else raise BuildScriptError, "Unknown ZIP subcommand #{subcommand}"
+      end
+    end
+    
+    tmp_dir = "#{dst_file}.ztmp"
+    FileUtils.mkdir_p tmp_dir
+    specs.each do |dst_suffix, src|
+      dst_suffix = dst_suffix[1..-1] if dst_suffix[0..0] == '/'
+      dst = "#{tmp_dir}/#{dst_suffix}"
+      raise "#{src} does not exist" unless File.exists? src
+      raise "#{src} is a file, but #{dst_suffix} is already a directory when zipping #{src_file}" if File.file?(src) && File.directory?(dst)
+      cp_merge src, dst
+    end
+    
+    FileUtils.cd tmp_dir do
+      case dst_file
+      when /\.zip$/
+        invoke 'zip', '-r', dst_file, *list_entries(tmp_dir)
+      when /\.tar$/
+        invoke 'tar', 'cf', dst_file, *list_entries(tmp_dir)
+      when /\.tar\.bz2$/
+        invoke 'tar', 'cjf', dst_file, *list_entries(tmp_dir)
+      when /\.tar\.gz$/, /\.tgz$/
+        invoke 'tar', 'czf', dst_file, *list_entries(tmp_dir)
+      else
+        raise "Don't know how to compress into #{dst_file}"
+      end
     end
     FileUtils.rm_rf(tmp_dir)
   end
