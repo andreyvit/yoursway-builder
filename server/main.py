@@ -61,17 +61,6 @@ level_names = {
   GOD_LEVEL: 'developer'
 }
 
-class Account(db.Model):
-  user = db.UserProperty()
-  email = db.EmailProperty()
-  level = db.IntegerProperty(default = NORMAL_LEVEL, choices = [ANONYMOUS_LEVEL, VIEWER_LEVEL, NORMAL_LEVEL, ADMIN_LEVEL, GOD_LEVEL])
-  
-  def level_name(self):
-    return level_names[self.level]
-    
-  def urlname(self):
-    return self.email
-
 class Builder(db.Model):
   name = db.StringProperty()
   created_at = db.DateTimeProperty(auto_now_add = True)
@@ -233,6 +222,18 @@ class Message(db.Model):
   created_at = db.DateTimeProperty(auto_now_add = True)
   body = db.TextProperty()
   state = db.IntegerProperty(default = 0)
+
+class Account(db.Model):
+  user = db.UserProperty()
+  email = db.EmailProperty()
+  level = db.IntegerProperty(default = NORMAL_LEVEL, choices = [ANONYMOUS_LEVEL, VIEWER_LEVEL, NORMAL_LEVEL, ADMIN_LEVEL, GOD_LEVEL])
+  last_used_builder = db.ReferenceProperty(Builder, collection_name = 'last_used_by')
+
+  def level_name(self):
+    return level_names[self.level]
+
+  def urlname(self):
+    return self.email
 
 class FinishRequest(Exception):
   pass
@@ -537,8 +538,13 @@ class ProjectHandler(BaseHandler):
       builders = self.fetch_active_builders()
       online_builders = [b for b in builders if b.is_online()]
       recent_builders = [b for b in builders if not b.is_online()]
+    
+      last_used_builder = self.account.last_used_builder
+      if last_used_builder and last_used_builder.key() not in map(lambda b: b.key(), builders):
+        last_used_builder = None
+      
       self.data.update(online_builders = online_builders, recent_builders = recent_builders,
-        builders = online_builders + recent_builders)
+        builders = online_builders + recent_builders, last_used_builder = last_used_builder)
     
     num_latest = self.config.num_latest_builds
     num_recent = self.config.num_recent_builds
@@ -587,6 +593,10 @@ class BuildProjectHandler(BaseHandler):
         flash = "Version %s already exists. Please pick another." % version)
       
     self.start_build(version, self.builder)
+    
+    if self.account:
+      self.account.last_used_builder = self.builder
+      self.account.put()
     
     self.redirect_and_finish('/projects/%s' % self.project.urlname(),
       flash = "Started bulding version %s. Please refresh this page to track status." % version)

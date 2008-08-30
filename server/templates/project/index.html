@@ -15,7 +15,7 @@
   <p><label for="builder">Builder: </label>
   	<select type="text" id="builder" name="builder" value="">
   		{% for builder in builders %}
-  		<option value="{{ builder.name }}">{{ builder.name }}</option>
+  		<option value="{{ builder.name }}" {% ifequal last_used_builder.key builder.key %}selected="selected"{% endifequal %}>{{ builder.name }}</option>
   		{% endfor %}
   	</select>
   </p>
