@@ -348,6 +348,13 @@ private
         raise "#{src} does not exist (in COPYTO)" unless File.exists? src
         raise "#{src} is a file, but #{dest} is already a directory (in COPYTO)" if File.file?(src) && File.directory?(dest)
         cp_merge src, dest
+      when 'SYMLINK'
+        dest_suffix, src = *subargs
+        dest = File.join(destination_dir, dest_suffix)
+        raise "#{src} does not exist (in COPYTO)" unless File.exists? src
+        raise "#{dest} already exists (in COPYTO)" if File.exists? dest
+        FileUtils.mkdir_p File.dirname(dest)
+        FileUtils.ln_s src, dest
       else
         raise BuildScriptError, "Unknown COPYTO subcommand: #{subcommand}"
       end
