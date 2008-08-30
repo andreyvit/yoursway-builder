@@ -267,16 +267,18 @@ private
     @items[version_name] = repository.create_item(version_name, *args)
   end
   
-  def do_new_item kind, name, tags, description
+  def do_new_item kind, alias_name, tags, name, description
     name = resolve_alias(name)
+    define_alias alias_name, name unless alias_name =~ /^-?$/
     tags = parse_tags(tags)
     item = @local_store.new_item(kind, name, tags, description)
     puts "new item defined: [#{item.name}]"
     @items[item.name] = item
   end
   
-  def do_existing_item kind, name, tags, store_and_path
+  def do_existing_item kind, alias_name, tags, name, store_and_path
     name = resolve_alias(name)
+    define_alias alias_name, name unless alias_name =~ /^-?$/
     tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
     store_name, path = store_and_path.split('/')
     store = @stores[store_name] or raise BuildScriptError, "Store #{store_name} not found"
@@ -286,6 +288,10 @@ private
   end
   
   def do_alias name, item_name
+    define_alias name, item_name
+  end
+  
+  def define_alias name, item_name
     @aliases[name] = resolve_alias(item_name)
   end
   
