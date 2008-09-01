@@ -119,7 +119,8 @@ class AmazonS3Connection
   def list
     parser = S3::ListBucketParser.new
     REXML::Document.parse_stream(raw_list, parser)
-    parser.entries.collect { |e| AmazonS3File.new_from_entry(e) }
+    parser.entries.select { |e| e.key.starts_with?(@key_prefix) }.collect { |e| AmazonS3File.new_from_entry(e,
+      e.key.drop_prefix_or_fail(@key_prefix)) }
   end
   
   def raw_list
@@ -202,9 +203,9 @@ class AmazonS3File
   
   attr_reader :key, :mtime, :size
   
-  def self.new_from_entry entry
+  def self.new_from_entry entry, key
     d = DateTime.parse(entry.last_modified)
-    self.new(entry.key, Time.gm(d.year, d.month, d.day, d.hour, d.min, d.sec), entry.size)
+    self.new(key, Time.gm(d.year, d.month, d.day, d.hour, d.min, d.sec), entry.size)
   end
   
   def initialize key, mtime, size

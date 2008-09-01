@@ -1,4 +1,5 @@
 require 'generator'
+require 'tempfile'
 
 module YourSway
 end
@@ -50,9 +51,12 @@ module YourSway::Sync
   private
   
     def write_file! path, file
+      local_path = file.to_local_file
       File.open(path, 'wb') do |f|
-        file.read_chunks do |chunk|
-          f.write chunk
+        File.open(local_path, 'rb') do |inf|
+          while chunk = inf.read(1024*1024) do
+            f.write chunk
+          end
         end
       end
     end
@@ -96,6 +100,10 @@ module YourSway::Sync
       File.mtime @full_path
     end
     
+    def to_local_file
+      return @full_path
+    end
+    
   end
   
 ##############################################################################################################
@@ -129,6 +137,12 @@ module YourSway::Sync
       end
     end
     
+    def list_files
+      @amazon.connect(@bucket, @key_prefix) do |c|
+        return c.list.collect { |f| S3File.new(nil, f, f.key) }
+      end
+    end
+    
   end
   
   class S3Connection
@@ -137,21 +151,42 @@ module YourSway::Sync
       @connection = connection
     end
     
-    def list
+    def list_files
+      @connection.list.collect { |f| S3File.new(@connection, f, f.key) }
+    end
+    
+    def add! rel_path, file
+      local_path = file.to_local_file
+      @connection.put_file rel_path, local_path
+    end
+    
+    def replace! old_file, file
+      add! old_file.rel_path, file
+    end
+    
+    def remove! file
+      @connection.delete file.rel_path
     end
     
   end
   
   class S3File
     
-    def initialize file
-      @file = file
-    end
+    attr_reader :rel_path
     
-    def rel_path
+    def initialize conn, file, rel_path
+      @conn = conn
+      @file = file
+      @rel_path = rel_path
     end
     
     def mtime; @file.mtime; end
+    
+    def to_local_file
+      tempf = Tempfile.new('amazon')
+      @conn.get_into_file @rel_path, tempf.path
+      return tempf.path
+    end
     
   end
 
@@ -234,8 +269,6 @@ module YourSway::Sync
     end
     first_party.connect do |first_connection|
       second_party.connect do |second_connection|
-        first_listing = first_connection.list_files.sort
-        second_listing = second_connection.list_files.sort
         queue.run_queue! first_connection, second_connection
       end
     end

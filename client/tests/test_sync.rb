@@ -57,6 +57,36 @@ def test name
 
 end
 
+def s3test name
+
+  dir1 = '/tmp/sync'
+
+  FileUtils.rm_rf dir1
+
+  FileUtils.mkdir_p dir1
+  
+  s3 = AmazonS3.new('1QPPZJR04QSS118WTS82', File.read(File.expand_path('~/.s3secret')).strip)
+  s3p = S3Party.new(s3, 'updates.yoursway.com', 'test_')
+
+  exp1, exp2 = yield dir1, s3p
+  
+  expected = [exp1.sort.join("\n"), '----', exp2.sort.join("\n")].join("\n")
+  actual = [list_entries_recursively(dir1).sort.join("\n"), '----', s3p.list_files.collect { |f| f.rel_path }.sort.join("\n")].join("\n")
+
+  if expected != actual
+    
+    puts "TEST FAILED:\n#{name}"
+    puts
+    puts "EXPECTED:\n#{expected}"
+    puts
+    puts "ACTUAL:\n#{actual}"
+    
+    fail
+    
+  end
+
+end
+
 include YourSway::Sync
 
 test "Sync does nothing by default" do |dir1, dir2|
@@ -104,4 +134,33 @@ test "Sync updates files" do |dir1, dir2|
   YourSway::Sync.synchronize LocalParty.new(dir1), LocalParty.new(dir2), [m]
   
   [['foo'], ['foo']]
+end
+
+s3test "Sync uploads to S3" do |dir, s3|
+  
+  write_file dir, 'foo'
+
+  m = SyncMapping.new('', [], '', [:add, :replace])
+  YourSway::Sync.synchronize LocalParty.new(dir), s3, [m]
+  
+  [['foo'], ['foo']]
+  
+end
+
+s3test "Sync downloads from S3" do |dir, s3|
+  
+  m = SyncMapping.new('', [:add, :replace], '', [])
+  YourSway::Sync.synchronize LocalParty.new(dir), s3, [m]
+  
+  [['foo'], ['foo']]
+  
+end
+
+s3test "Deletes from S3" do |dir, s3|
+  
+  m = SyncMapping.new('', [], '', [:remove])
+  YourSway::Sync.synchronize LocalParty.new(dir), s3, [m]
+  
+  [[], []]
+  
 end
