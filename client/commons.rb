@@ -1,369 +1,175 @@
 
-class Item
-  
-  def in_local_store?
-    false
-  end
+require 'generator'
 
-  # name
-  # fetch_locally
-  
+class Symbol
+  def to_proc
+    proc { |obj, *args| obj.send(self, *args) }
+  end
 end
 
-class RepositoryItem < Item
-
+class Generator
+  def next_or_nil
+    if self.next? then self.next else nil end
+  end
 end
 
-module LocalItem
+module YourSway
   
-  def obliterate_completely!
-    path = @store.fetch_locally(self)
-    FileUtils.rm_rf path
-  end
-  
-  def bring_parent_to_life!
-    path = @store.fetch_locally(self)
-    FileUtils.mkdir_p File.dirname(path)
-  end
-  
-  def bring_me_to_life!
-    path = @store.fetch_locally(self)
-    initialize_new_location path
-  end
-  
-  def in_local_store?
-    true
-  end
-  
-end
-
-class StoreItem < Item
-  
-  attr_reader :name, :tags, :description
-  
-  def initialize store, name, tags, description
-    @store = store
-    @name = name
-    @tags = tags
-    @description = description
-    @used = false
-  end
-  
-  def fetch_locally
-    @used = true
-    return @store.fetch_locally(self)
-  end
-  
-  def used?
-    @used
-  end
-  
-  def has_been_put_into store
-    @store.item_has_been_put_into self, store
-  end
-  
-  def file?
-    :file == kind
-  end
-  
-  def directory?
-    :directory == kind
-  end
-  
-end
-
-class StoreDir < StoreItem
-  
-  def initialize_new_location path
-    FileUtils.mkdir_p path
-  end
-  
-  def kind
-    :directory
-  end
-  
-end
-
-class StoreFile < StoreItem
-  
-  def initialize_new_location path
-    FileUtils.mkdir_p File.dirname(path)
-  end
-  
-  def kind
-    :file
-  end
-  
-end
-
-class Location
-  
-  attr_reader :tags
-  
-  def initialize tags
-    @tags = tags
-  end
-  
-  def public?
-    @tags.include? 'public'
-  end
-  
-  def url?
-    :url == kind
-  end
-  
-  def put item
-    raise "#{self.class.name} does not support puts, so cannot put #{item.name}"
-  end
+  class PathMapping
     
-end
-
-class LocalFileSystemLocation < Location
-  
-  attr_reader :path
-  
-  def initialize tags, builder_name, path
-    super(tags)
-    @builder_name = builder_name
-    @path = path
-  end
-  
-  def path_of item
-    File.join(@path, item.name)
-  end
+    attr_reader :first_prefix, :second_prefix
     
-  def kind
-    :filesystem
+    def initialize first_prefix, second_prefix
+      @first_prefix  = first_prefix .add_trailing_slash.drop_leading_slash
+      @second_prefix = second_prefix.add_trailing_slash.drop_leading_slash
+    end
+    
+    def first_to_second first_path
+      raise "1st path #{first_path} does not match this mapping" unless first_path.matches_path_prefix? @first_prefix
+      first_path.replace_prefix @first_prefix, @second_prefix
+    end
+    
+    def second_to_first second_path
+      raise "2nd path #{second_path} does not match this mapping" unless second_path.matches_path_prefix? @second_prefix
+      second_path.replace_prefix @second_prefix, @first_prefix
+    end
+    
   end
   
-  def describe_location_of(item)
-    "#{@builder_name}:#{File.join(@path, item.name)}"
-  end
-  
-end
+  class SequenceDiffer
+    
+    def initialize
+      @on_first = @on_second = @on_both = proc {}
+    end
+    
+    def on_first &block; @on_first = block; end
+    def on_second &block; @on_second = block; end
+    def on_both &block; @on_both = block; end
 
-class HttpLocation < Location
-  
-  attr_reader :url
-  
-  def initialize tags, url
-    super(tags)
-    @url = url
-  end
-  
-  def kind
-    :url
-  end
-  
-  def describe_location_of(item)
-    uri = URI::parse(@url)
-    uri.path = "#{uri.path}/#{item.name}"
-    return uri.to_s
-  end
-  
-  def fetch_locally_into item, local_path
-    raise "Fetching directories via HTTP is not supported" if item.directory?
-
-    uri = URI::parse(@url)
-    uri.path = "#{uri.path}/#{item.name}"
-
-    FileUtils.mkdir_p(File.dirname(local_path))
-    catch(:successfully_done) do
-      response = with_automatic_retries(5) do
-        File.open(local_path, 'wb') do |file|
-          http = Net::HTTP.new(uri.host, uri.port.to_i)
-          http.use_ssl = (uri.scheme == 'https')
-          http.start do
-            http.request_get(uri.request_uri) do |response|
-              next response unless Net::HTTPOK === response
-              response.read_body do |chunk|
-                file.write(chunk)
-              end
-              throw :successfully_done
-            end
-          end
+    def run_diff! first, second
+      first_gen = Generator.new(first.sort { |a, b| yield(a,b) })
+      second_gen = Generator.new(second.sort { |a, b| yield(a,b) })
+      first_cur = first_gen.next_or_nil
+      second_cur = second_gen.next_or_nil
+      until first_cur.nil? or second_cur.nil?
+        case yield(first_cur, second_cur)
+        when -1
+          @on_first.call first_cur
+          first_cur = first_gen.next_or_nil
+        when 1
+          @on_second.call second_cur
+          second_cur = second_gen.next_or_nil
+        when 0
+          @on_both.call first_cur, second_cur
+          first_cur = first_gen.next_or_nil
+          second_cur = second_gen.next_or_nil
         end
       end
-      File.unlink(local_path)
-      raise "Could not download #{uri}: error #{response.code}" if response
-      raise "Could not download #{uri}"
+      until first_cur.nil?
+        @on_first.call first_cur
+        first_cur = first_gen.next_or_nil
+      end
+      until second_cur.nil?
+        @on_second.call second_cur
+        second_cur = second_gen.next_or_nil
+      end
     end
+    
   end
   
-end
-
-class ScpLocation < Location
-  
-  def initialize tags, path
-    super(tags)
-    @path = path
-  end
-
-  def kind
-    :filesystem
-  end
-
-  def describe_location_of(item)
-    "#{@path}/#{item.name}"
-  end
-  
-  def put item
-    local_path = item.fetch_locally
-    invoke 'scp', '-r', local_path, "#{@path}/#{item.name}"
-  end
-  
-  def fetch_locally_into item, local_path
-    FileUtils.mkdir_p(File.dirname(local_path))
-    if item.file?
-      invoke 'scp', "#{@path}/#{item.name}", local_path
-    else
-      FileUtils.mkdir_p local_path
-      invoke 'scp', '-r', "#{@path}/#{item.name}", local_path
+  module ArrayAdditions
+    
+    def process_and_remove_each
+      until self.empty?
+        yield self.first
+        self.shift
+      end
     end
+    
+    def compute_prefix_mapping
+      self.collect { |obj| [yield(obj), obj] }.sort { |b,a| a[0].length <=> b[0].length }
+    end
+    
+  end
+  
+  module StringAdditions
+    
+    def remove_leading_slash
+      if self.starts_with? '/' then self[1..-1] else self end
+    end
+    
+    def subst_empty default_value
+      if self.empty? then default_value else self end
+    end
+
+    def starts_with? prefix
+      prefix.length == 0 or self[0..prefix.length-1] == prefix
+    end
+
+    def ends_with? suffix
+      self[-suffix.length..-1] == suffix
+    end
+
+    def drop_prefix prefix
+      if self.starts_with? prefix then self[prefix.length..-1] else self end
+    end
+
+    def drop_prefix_or_fail prefix
+      return self[prefix.length..-1] if self.starts_with? prefix
+      raise "'#{self}' does not start with '#{prefix}'"
+    end
+
+    def drop_suffix prefix
+      if self.ends_with? suffix then self[0..-suffix.length-1] else self end
+    end
+
+    def drop_suffix_or_fail suffix
+      return self[0..-suffix.length-1] if self.ends_with? suffix
+      raise "'#{self}' does not end with '#{suffix}'"
+    end
+    
+    def add_suffix suffix
+      if starts_with? suffix then self else "#{self}#{suffix}" end
+    end
+    
+    def add_trailing_slash
+      add_suffix '/'
+    end
+    
+    def drop_leading_slash
+      drop_prefix '/'
+    end
+    
+    def matches_path_prefix? prefix
+      self.add_trailing_slash.drop_leading_slash.starts_with?(prefix.add_trailing_slash.drop_leading_slash)
+    end
+    
+    def replace_prefix old_prefix, new_prefix
+      self[old_prefix.length..-1] + new_prefix
+    end
+    
+  end
+  
+  class PathMappingMatcher
+
+    def initialize mappings
+      @first_to_mappings  = mappings.compute_prefix_mapping(&:first_prefix)
+      @second_to_mappings = mappings.compute_prefix_mapping(&:second_prefix)
+    end
+    
+    def lookup_first first_prefix
+      r = @first_to_mappings.find { |fc, mapping| first_prefix.matches_path_prefix?(fc) }
+      r && r[1]
+    end
+    
+    def lookup_second second_prefix
+      r = @second_to_mappings.find { |sc, mapping| second_prefix.matches_path_prefix?(sc) }
+      r && r[1]
+    end
+    
   end
   
 end
 
-class AmazonS3Location < Location
-  
-  # accesskey!secretkey!bucket:path
-  def initialize tags, path
-    super(tags)
-    raise "invalid S3 path format '#{path}', should be accesskey!secretkey!bucket:path" unless path =~ /^([^!]+)!([^!]+)!([^:]+):/
-    @access_key = $1
-    @secret_access_key = $2
-    @bucket = $3
-    @path = $'
-    @path = "#{@path}/" if @path.length > 0 && @path[-1..-1] != '/'
-  end
-
-  def kind
-    :s3
-  end
-
-  def describe_location_of(item)
-    "#{@bucket}:#{@path}/#{item.name}"
-  end
-  
-  def put item
-    raise "cannot upload a directory to S3 (not supported yet, and not needed)" if item.directory?
-    local_path = item.fetch_locally
-    s3 = AmazonS3.new(@access_key, @secret_access_key)
-    s3.put_file @bucket, "#{@path}#{item.name}", local_path
-  end
-  
-  def fetch_locally_into item, local_path
-    raise "GETs from Amazon S3 are not supported (please set up an HTTP location for GETs)"
-  end
-  
-end
-
-class Store
-  
-  KINDS = { :file => StoreFile, :directory => StoreDir }
-  
-  attr_reader :name, :locations, :description, :tags
-  
-  def initialize name, tags, description
-    @name = name
-    @tags = tags
-    @description = description
-    @locations = []
-  end
-  
-  def add_location! location
-    @locations << location
-  end
-  
-  def item_has_been_put_into item, store
-  end
-  
-  def public?
-    @tags.include? 'public'
-  end
-  
-end
-
-class LocalStore < Store
-  
-  def initialize builder_name, tags, path
-    super(builder_name, tags, '')
-    @local_location = LocalFileSystemLocation.new(['public'], builder_name, path)
-    @locations << @local_location
-    @item_stores = {}
-  end
-  
-  def fetch_locally item
-    return path_of(item)
-  end
-  
-  def path_of item
-    @local_location.path_of(item)
-  end
-  
-  def all_items
-    @item_stores.keys
-  end
-  
-  def stores_for item
-    @item_stores[item] || []
-  end
-  
-  def new_item kind, name, tags, description
-     item = KINDS[kind].new(self, name, tags, description)
-     item.extend LocalItem
-     item.initialize_new_location path_of(item)
-     item.has_been_put_into self
-     return item
-  end
-  
-  def item_has_been_put_into item, store
-    (@item_stores[item] ||= []) << store
-  end
-  
-  def fetch_remote_item item, remote_store
-    path = path_of(item)
-    return path if File.exists?(path)
-    remote_store.fetch_locally_into(item, path)
-    return path
-  end
-  
-  def local?
-    true
-  end
-  
-end
-
-class RemoteStore < Store
-  
-  def initialize local_store, name, tags, description
-    super(name, tags, description)
-    @local_store = local_store
-  end
-  
-  def item_has_been_put_into item, store
-  end
-  
-  def existing_item kind, name, tags, description
-     item = KINDS[kind].new(self, name, tags, description)
-     return item
-  end
-  
-  def put item
-    @locations.first.put item
-    item.has_been_put_into self
-  end
-  
-  def fetch_locally item
-    return @local_store.fetch_remote_item(item, self)
-  end
-  
-  def fetch_locally_into item, local_path
-    @locations.last.fetch_locally_into item, local_path
-  end
-  
-  def local?
-    false
-  end
-  
-end
+Array.send(:include, YourSway::ArrayAdditions)
+String.send(:include, YourSway::StringAdditions)
