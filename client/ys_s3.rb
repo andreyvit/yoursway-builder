@@ -8,11 +8,15 @@ class HttpError < StandardError
   attr_reader :code
   
   class << self
-    alias plain_new new
-    def new code
-      case code
-      when 500...600 then Http5xxError.plain_new(code)
-      else                HttpOtherError.plain_new(code)
+    unless const_defined?('NewRedefined')
+      NewRedefined = true
+    
+      alias plain_new new
+      def new code
+        case code
+        when 500...600 then Http5xxError.plain_new(code)
+        else                HttpOtherError.plain_new(code)
+        end
       end
     end
   end
