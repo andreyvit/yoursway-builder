@@ -16,6 +16,12 @@ require 'net/http'
 require 'uri'
 require 'optparse'
 
+BUILDER_ROOT = File.expand_path(File.dirname(__FILE__))
+Dir.chdir BUILDER_ROOT
+$:.unshift BUILDER_ROOT
+COLON_BEFORE_EXECUTOR_LEN = $:.length
+require 'executor'
+
 class Config
   attr_accessor :server_host, :builder_name
   attr_accessor :poll_interval, :poll_interval_overriden
@@ -73,9 +79,6 @@ interrupted = false
 # trap("INT") { interrupted = true }
 
 obtain_work_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/obtain-work")
-
-executor_rb = File.expand_path(File.join(File.dirname(__FILE__), 'executor.rb'))
-load executor_rb
 
 def log message
   puts message
@@ -146,7 +149,16 @@ while not interrupted
         report = nil
         outcome = "SUCCESS"
         begin
-          load executor_rb
+          # enable reloading of all local sources
+          Dir.chdir BUILDER_ROOT
+          dummy = []
+          dummy << $".pop while $".length > COLON_BEFORE_EXECUTOR_LEN
+          dummy.each do |path|
+            expanded_path = File.expand_path(path)
+            $".push path unless expanded_path[0..BUILDER_ROOT.length-1] == BUILDER_ROOT && File.exists?(expanded_path)
+          end
+          require 'executor'
+          
           executor = Executor.new(config.builder_name)
       
           until other_lines.empty?

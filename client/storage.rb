@@ -229,12 +229,11 @@ class AmazonS3Location < Location
   # accesskey!secretkey!bucket:path
   def initialize tags, path
     super(tags)
-    raise "invalid S3 path format '#{path}', should be accesskey!secretkey!bucket:path" unless path =~ /^([^!]+)!([^!]+)!([^:]+):/
+    raise "invalid S3 path format '#{path}', should be accesskey!secretkey!bucket:key_prefix" unless path =~ /^([^!]+)!([^!]+)!([^:]+):/
     @access_key = $1
     @secret_access_key = $2
     @bucket = $3
-    @path = $'
-    @path = "#{@path}/" if @path.length > 0 && @path[-1..-1] != '/'
+    @key_prefix = $'
   end
 
   def kind
@@ -242,14 +241,14 @@ class AmazonS3Location < Location
   end
 
   def describe_location_of(item)
-    "#{@bucket}:#{@path}/#{item.name}"
+    "#{@bucket}:#{@key_prefix}#{item.name}"
   end
   
   def put item
     raise "cannot upload a directory to S3 (not supported yet, and not needed)" if item.directory?
     local_path = item.fetch_locally
     s3 = AmazonS3.new(@access_key, @secret_access_key)
-    s3.put_file @bucket, "#{@path}#{item.name}", local_path
+    s3.put_file @bucket, "#{@key_prefix}#{item.name}", local_path
   end
   
   def fetch_locally_into item, local_path

@@ -1,5 +1,5 @@
 
-['commons.rb', 'git.rb', 'amazons3.rb'].each { |file_name| load File.join(File.dirname(__FILE__), file_name) }
+['commons', 'ys_s3', 'storage', 'git', 'sync', 'storage_sync'].each { |file_name| require file_name }
 
 def invoke cmd, *args
   args = [''] if args.empty?
@@ -63,32 +63,6 @@ def list_entries_recursively(path, result = [])
     end
   end
   return result
-end
-
-class String
-  
-  def subst_empty default_value
-    if self.empty? then default_value else self end
-  end
-  
-  def starts_with? prefix
-    self[0..prefix.length-1] == prefix
-  end
-  
-  def ends_with? suffix
-    self[-suffix.length..-1] == suffix
-  end
-  
-  def drop_prefix_or_fail prefix
-    return self[prefix.length..-1] if self.starts_with? prefix
-    raise "'#{self}' does not start with '#{prefix}'"
-  end
-  
-  def drop_suffix_or_fail suffix
-    return self[0..-suffix.length-1] if self.ends_with? suffix
-    raise "'#{self}' does not end with '#{suffix}'"
-  end
-  
 end
 
 class BuildScriptError < StandardError
@@ -159,6 +133,8 @@ class Executor
       do_alias *args
     when 'PUT'
       do_put *args
+    when 'SYNC'
+      do_sync data_lines, *args
     when 'ZIP'
       do_zip data_lines, *args
     when 'UNZIP'
@@ -450,6 +426,51 @@ private
         raise BuildScriptError, "Unknown COPYTO subcommand: #{subcommand}"
       end
     end
+  end
+  
+  def parse_sync_actions actions
+    case actions
+    when 'readonly' then return []
+    when 'mirror'   then return [:add, :remove, :replace]
+    else
+      return actions.split(',').collect do |action|
+        case action
+        when 'add', 'remove', 'replace', 'update' then :"#{action}"
+        else raise BuildScriptError, "Invalid action '#{action}' in SYNC command"
+        end
+      end
+    end
+  end
+  
+  def parse_sync_party party_name
+    party_name = resolve_alias(party_name)
+    if item = @items[party_name]
+       [item.create_sync_party].each { |party| return party unless party.nil? }
+    end
+    if store = @stores[party_name]
+      [store.create_sync_party].each { |party| return party unless party.nil? }
+    end
+    return YourSway::Sync::LocalParty.new(party_name) if File.directory? party_name
+    expanded_path = File.expand_path(party_name)
+    return YourSway::Sync::LocalParty.new(expanded_path) if File.directory? expanded_path
+    raise BuildScriptError, "SYNC: unrecognized party spec '#{party_name}'"
+  end
+  
+  def do_sync data_lines, first, second
+    mappings = []
+    data_lines.each do |subcommand, *args|
+      case subcommand.upcase
+      when 'MAP' 
+        first_prefix, first_actions, second_prefix, second_actions = *args
+        raise BuildScriptError, "MAP subcommand of SYNC command has incorrect syntax" if second_actions.nil?
+        
+        mappings << YourSway::Sync::SyncMapping.new(first_prefix, parse_sync_actions(first_actions),
+          second_prefix, parse_sync_actions(second_actions))
+      else raise BuildScriptError, "Unknown ZIP subcommand #{subcommand}"
+      end
+    end
+    
+    YourSway::Sync.synchronize parse_sync_party(first), parse_sync_party(second), mappings
   end
   
   def do_fix_plist data_lines, file
