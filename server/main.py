@@ -752,6 +752,8 @@ class ReportProgressHandler(BaseHandler):
     console = self.request.get('console')
     key = "progress-%s" % (message_key)
     memcache.set(key, console, time = 60*60)
+    
+  get = post
 
 class MessageConsoleHandler(BaseHandler):
   def post(self, message_key):
