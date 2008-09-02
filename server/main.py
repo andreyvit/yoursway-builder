@@ -8,6 +8,7 @@ import cgi
 from datetime import datetime, timedelta
 from google.appengine.ext.webapp import template
 from google.appengine.api import users
+from google.appengine.api import memcache
 from google.appengine.ext import db
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp.util import run_wsgi_app
@@ -140,7 +141,13 @@ class Build(db.Model):
   failure_reason = db.TextProperty(default = '')
   created_at = db.DateTimeProperty(auto_now_add = True)
   created_by = db.UserProperty()
-  
+      
+  def set_active_message(self, message):
+    self._active_message = message
+    
+  def active_message(self):
+    return self._active_message
+
   def calculate_derived_data(self):
     stores = dict()
     items = dict()
@@ -215,6 +222,14 @@ class Build(db.Model):
     if len(self.failure_reason) == 0:
       return "(unknown failure reason)"
     return self.failure_reason.split("\n", 1)[0]
+    
+  def is_queued_or_in_progress(self):
+    return self.state in [BUILD_QUEUED, BUILD_INPROGRESS]
+    
+MESSAGE_QUEUED = 0
+MESSAGE_INPROGRESS = 1
+MESSAGE_DONE = 2
+MESSAGE_ABANDONED = 3
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -365,7 +380,7 @@ class BaseHandler(webapp.RequestHandler):
     for builder in result:
       builder.bind_environment(self.config, self.now)
     for builder in result:
-      count = builder.messages.filter('state =', 0).count(limit = 10)
+      count = builder.messages.filter('state =', 0).order('created_at').count(limit = 10)
       logging.info("count for builder %s: %d" % (builder.name, count))
       builder.set_message_count(count)
     return result
@@ -558,6 +573,13 @@ class ProjectHandler(BaseHandler):
     recent_builds = builds[0:num_recent]
     for build in latest_builds:
       build.calculate_derived_data()
+      
+      if build.state in (BUILD_QUEUED, BUILD_INPROGRESS):
+        active_message = build.messages.filter('state =', 1).get()
+        if active_message is None:
+          active_message = build.messages.filter('state =', 0).get()
+        build.set_active_message(active_message)
+      
 
     next_version = calculate_next_version(builds[0] if builds else None)
     
@@ -725,6 +747,18 @@ class BuilderMessageDoneHandler(BaseHandler):
       build.state = BUILD_ABANDONED
     build.put()
 
+class ReportProgressHandler(BaseHandler):
+  def post(self, message_key):
+    console = self.request.get('console')
+    key = "progress-%s" % (message_key)
+    memcache.set(key, console, time = 60*60)
+
+class MessageConsoleHandler(BaseHandler):
+  def post(self, message_key):
+    key = "progress-%s" % (message_key)
+    value = memcache.get(key)
+    self.response.out.write("<pre>%s</pre>" % value)
+
 class ServerConfigHandler(BaseHandler):
   @prolog(config_needed = False, required_level = ADMIN_LEVEL)
   def get(self):
@@ -772,6 +806,8 @@ url_mapping = [
   
   ('/builders/([^/]*)/obtain-work', BuilderObtainWorkHandler),
   ('/builders/([^/]*)/messages/([^/]*)/done', BuilderMessageDoneHandler),
+  ('/messages/([^/]*)/report_progress', ReportProgressHandler),
+  ('/messages/([^/]*)/console', MessageConsoleHandler),
   ('/server-config', ServerConfigHandler),
 ]
 application = webapp.WSGIApplication(url_mapping, debug=True)

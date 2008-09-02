@@ -2,6 +2,10 @@
 
 {% block title %}{{ project.name }}{% endblock %}
 
+{% block head %}
+<script src="/javascript/ajax.js"></script>
+{% endblock %}
+
 {% block content %}
 
 <h1>{{ project.name }}</h1>       
@@ -61,6 +65,24 @@
       <p>Error summary: {{ build.failure_reason_summary }}</p>
     {% endif %}
   {% endifequal %}
+  {% if build.active_message %}
+		<pre id="output_{{ build.key.id }}" style="margin: 10px 40px; background: black; color: white; font-size: 9pt; border: 1px dotted white; padding: 10px; height: 100px; overflow: scroll;"></pre>
+		<script>
+			function myfunc() {
+				var f;
+				f = function() {
+					ajax("/messages/{{ build.active_message.key }}/console", "", function(responseText) {
+						var el = document.getElementById('output_{{ build.key.id }}');
+						el.innerHTML = "Response: " + responseText;
+					});
+					window.setTimeout(f, 2000);
+				};
+				window.setTimeout(f, 2000);
+			}
+			myfunc();
+		</script>
+		<div><a href="/messages/{{ build.active_message.key }}/report_progress?console=Wow+that+is+cool" target="_new">Set progress for message {{ build.active_message.key }}</a></div>
+	{% endif %}
 {% if build.stores %}
   <dl>
   {% for store in build.stores %}

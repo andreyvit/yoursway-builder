@@ -6,6 +6,8 @@ api_version: 1
 handlers:
 - url: /images
   static_dir: static/images
+- url: /javascript
+  static_dir: static/javascript
 - url: /admin/.*
   script: $PYTHON_LIB/google/appengine/ext/admin
   login: admin
