@@ -267,9 +267,11 @@ module YourSway::Sync
         process_listings! q, first_listing, second_listing, mappings
       end
     end
-    first_party.connect do |first_connection|
-      second_party.connect do |second_connection|
-        queue.run_queue! first_connection, second_connection
+    with_automatic_retries(20) do
+      first_party.connect do |first_connection|
+        second_party.connect do |second_connection|
+          queue.run_queue! first_connection, second_connection
+        end
       end
     end
   end
