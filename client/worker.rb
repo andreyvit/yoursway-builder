@@ -302,6 +302,7 @@ def process_job feedback, builder_name, message_id, other_lines
   begin
     executor = Executor.new(builder_name, feedback)
 
+    commands = []
     until other_lines.empty?
       line = other_lines.shift.chomp
       next if line.strip.empty?
@@ -321,7 +322,11 @@ def process_job feedback, builder_name, message_id, other_lines
         end
       end
   
-      executor.execute command, args, data
+      commands << executor.new_command(command, args, data)
+    end
+    
+    commands.each do |command|
+      executor.execute_command! command
     end
   
     report = executor.create_report.collect { |row| row.join("\t") }.join("\n")

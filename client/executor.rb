@@ -87,6 +87,9 @@ end
 
 class Executor
   
+  attr_reader :project_dir, :local_store
+  attr_reader :variables, :repositories, :items, :stores
+  
   def initialize builder_name, feedback
     @builder_name = builder_name # used to make create a local store name
     @feedback = feedback
@@ -101,71 +104,28 @@ class Executor
       @storage_dir = File.join(File.tmpdir, "ysbuilder-#{builder_name}")
     end
     load_alternates_file
+    
+    @actions = {}
+    ObjectSpace.each_object(Class) do |klass|
+      if klass.superclass == Command
+        klass.command_names.each do |name|
+          @actions[name] = klass
+        end
+      end
+    end
   end
   
-  def execute command, args, data_lines
+  def new_command command, args, data_lines
     @feedback.start_command command, :long
     begin
-      do_execute command, args, data_lines
+      return do_new_command(command, args, data_lines)
     ensure
       @feedback.finished_command
     end
   end
   
-  def do_execute command, args, data_lines
-    args.collect! { |arg| subst(arg) }
-    data_lines.each { |line|
-      line.collect! { |arg| subst(arg) }
-    }
-    
-    case command.upcase
-    when 'PROJECT'
-      do_project *args
-    when 'SAY'
-      do_say *args
-    when 'SET'
-      do_set *args
-    when 'INVOKE'
-      do_invoke data_lines, *args
-    when 'INVOKERUBY'
-      do_invoke_ruby data_lines, *args
-    when 'GITREPOS'
-      do_gitrepos data_lines, *args
-    when 'STORE'
-      do_store data_lines, *args
-    when 'VERSION'
-      do_version *args
-    when 'NEWDIR'
-      do_new_item :directory, *args
-    when 'NEWFILE'
-      do_new_item :file, *args
-    when 'DIR'
-      do_existing_item :directory, *args
-    when 'FILE'
-      do_existing_item :file, *args
-    when 'ALIAS'
-      do_alias *args
-    when 'PUT'
-      do_put *args
-    when 'SYNC'
-      do_sync data_lines, *args
-    when 'ZIP'
-      do_zip data_lines, *args
-    when 'UNZIP'
-      do_unzip data_lines, *args
-    when 'COPYTO'
-      do_copyto data_lines, *args
-    when 'FIXPLIST'
-      do_fix_plist data_lines, *args
-    when 'SUBSTVARS'
-      do_subst_vars data_lines, *args
-    when 'NSIS-FILE-LIST'
-      do_nsis_file_list *args
-    when 'SLEEP'
-      do_sleep *args
-    else
-      raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
-    end
+  def do_new_command command, args, data_lines
+    (@actions[command.upcase] or raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})").new(self, data_lines, args)
   end
   
   def create_report
@@ -191,6 +151,76 @@ class Executor
     return report
   end
   
+  def set_project! permalink, name
+    @variables['project'] = permalink
+    @variables['project-name'] = name
+    @project_dir = File.join(@storage_dir, permalink)
+    FileUtils.mkdir_p(@project_dir)
+    
+    @local_store = LocalStore.new(@builder_name, [], File.join(@project_dir, 'localitems'))
+    @stores[@local_store.name] = @local_store
+  end
+  
+  def define_repository name
+    @repositories[name] ||= yield
+  end
+  
+  def redefine_repository! name, repos
+    @repositories[name] = repos
+  end
+  
+  def define_store name
+    @stores[name] ||= yield
+  end
+  
+  def override_for repos
+    @overrides.find { |o| o.matches? repos }
+  end
+  
+  def resolve_alias name
+    @aliases[name] || name
+  end
+  
+  def define_item! name, item
+    raise "Duplicate item #{item}" unless @items[name].nil?
+    @items[name] = item
+    @feedback.info "new item defined: [#{item.name}]"
+  end
+  
+  def define_variable name, value
+    @variables[name] = value
+  end
+  
+  def find_repository name
+    @repositories[name] or raise BuildScriptError, "Repository #{name} not found"
+  end
+  
+  def find_store name
+    @stores[name] or raise BuildScriptError, "Store #{name} not found"
+  end
+  
+  def find_item name
+    @items[name] or raise BuildScriptError, "Item #{name} not found"
+  end
+
+  def execute_command! command
+    # resolve & subst refs
+    loop do
+      refs = command.collect_refs
+      break if refs.empty?
+      
+      values = {}
+      refs.each { |ref, tags| values[ref] = resolve_ref(ref, tags) }
+      command.subst_refs! values
+    end
+    
+    command.execute! self, @feedback
+  end
+
+  def define_alias name, item_name
+    @aliases[name] = resolve_alias(item_name)
+  end
+  
 private
 
   def load_alternates_file
@@ -206,17 +236,6 @@ private
     end
   end
   
-  def subst value, additional_variables = {}
-    loop do
-      result = value.gsub(/\[([^\[\]<]+)(?:<([^>]*)>)?\]/) { |var|
-        tags = parse_tags($2)
-        additional_variables[$1] or @variables[$1] or get_item($1, tags) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
-      }
-      return result if result == value
-      value = result
-    end
-  end
-  
   def get_item name, tags
     name = resolve_alias(name)
     item = @items[name] or return nil
@@ -228,183 +247,379 @@ private
     item.fetch_locally
   end
   
-  def do_project permalink, name
-    @variables['project'] = permalink
-    @variables['project-name'] = name
-    @project_dir = File.join(@storage_dir, permalink)
-    FileUtils.mkdir_p(@project_dir)
+  def parse_tags tags_str
+    tags_str = (tags_str || '').strip
+    return case tags_str when '', '-' then [] else tags_str.split(/\s*,\s*/) end
+  end
+  
+  def resolve_variable name, additional_variables
+    @variables[name] or raise ExecutionError.new("Undefined variable [#{ref}]")
+  end
+  
+  def resolve_ref ref, tags
+    @variables[ref] or get_item(ref, tags) or raise ExecutionError.new("Undefined variable or item [#{ref}]")
+  end
+  
+end
+
+class Command
+  
+  PATTERN = /\[([^\[\]<]+)(?:<([^>]*)>)?\]/
+  
+  def self.command_names
+    return [const_get('KEYWORD')] if const_defined?('KEYWORD')
+    raise "No name could be inferred for command #{self.name}" unless self.name =~ /^(.*)Command$/
+    [$1.upcase, $1.gsub(/([a-z])([A-Z])/) { |_| "#{$1}-#{$2}" }.upcase]
+  end
+  
+  def initialize executor, data_lines, args
+    @executor = executor
+    @data_lines = data_lines
+    @raw_args = args
+    @values = {}
+  end
+  
+  def collect_refs
+    (@raw_args.collect { |arg| collect_refs_in(arg) } +
+      @data_lines.collect { |line| line.collect { |arg| collect_refs_in(arg) } }).flatten.uniq
+  end
+  
+  def subst_refs! values
+    @raw_args.collect! { |arg| subst_refs_in(arg, values) }
+    @data_lines.each { |line|
+      line.collect! { |arg| subst_refs_in(arg, values) }
+    }
+  end
+  
+  def to_s
+    "#{KEYWORD}"
+  end
+  
+  def execute! executor, feedback
+    @executor = executor
+    @feedback = feedback
+    forward_to_handler! nil, :do_execute!, @raw_args
+  end
+  
+private
+
+  def execute_subcommands! *other_args
+    @data_lines.each do |subcommand, *subargs|
+      id = :"do_#{subcommand.downcase}!"
+      self.method(id) or raise BuildScriptError, "Undefined subcommand #{subcommand}"
+      forward_to_handler! subcommand, id, subargs, *other_args
+    end 
+  end
+
+  def forward_to_handler! subcommand, id, args, *prepend_args
+    descr = "Command #{command_name}"
+    descr = "Subcommand #{subcommand} of command #{command_name}" if subcommand
     
-    @local_store = LocalStore.new(@builder_name, [], File.join(@project_dir, 'localitems'))
-    @stores[@local_store.name] = @local_store
+    arity = self.method(id).arity
+    if arity > 0
+      raise BuildScriptError, "#{descr} expects #{arity-prepend_args.size} arguments, #{args.size} given" unless args.size == arity - prepend_args.size
+    elsif arity < -1
+      min_args = -arity - 1
+      raise BuildScriptError, "#{descr} expects at least #{min_args-prepend_args.size} arguments, #{args.size} given" unless args.size >= min_args - prepend_args.size
+    end
+    self.send(id, *(prepend_args + args))
+  end
+
+  def collect_refs_in string
+    result = []
+    string.scan(PATTERN) { |ref, tags| result << [ref, parse_tags(tags)] }
+    return result
+  end
+
+  def subst_refs_in string, values
+    @values.merge! values
+    string.gsub(PATTERN) { |_| values[$1] }
+    #     tags = parse_tags($2)
+    #     additional_variables[$1] or @variables[$1] or get_item($1, tags) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
+    #   }
+    #   return result if result == value
+    #   value = result
+    # end
   end
   
-  def do_say text
-    log "Saying #{text}"
-    invoke('say', text)
+  def parse_tags tags_str
+    tags_str = (tags_str || '').strip
+    return case tags_str when '', '-' then [] else tags_str.split(/\s*,\s*/) end
   end
   
-  def do_set name, value
-    @variables[name] = value
+  def command_name
+    self.class.command_names.first
   end
   
-  def do_invoke data_lines, app, *args
-    for name, value in @variables
+  def invoke! *args
+    invoke *args
+  end
+  
+end
+
+class SayCommand < Command
+  
+  def do_execute! text
+    @feedback.info "Saying #{text}."
+    invoke! 'say', text
+  end
+  
+end
+
+class ProjectCommand < Command
+  
+  def do_execute! permalink, name
+    @executor.set_project! permalink, name
+  end
+  
+end
+
+class SetCommand < Command
+  
+  def do_execute! name, value
+    @executor.define_variable name, value
+  end
+  
+end
+
+module InvokeCommands
+  
+  def execute_invoke! app, *args
+    for name, value in @executor.variables
       ENV[name] = value
     end
-    data_lines.each do |subcommand, *subargs|
-      case subcommand.upcase
-      when 'ARG', 'ARGS' then args.push(*subargs)
-      end
-    end
-    invoke(app, *args)
+    @args = args
+    execute_subcommands!
+    invoke! app, @args
   end
   
-  def do_invoke_ruby data_lines, *args
+  def do_arg! arg
+    @args.push arg
+  end
+  
+  def do_args! *args
+    @args.push *args
+  end
+
+end
+
+class InvokeCommand < Command
+  
+  include InvokeCommands
+  
+  def do_execute! app, *args
+    execute_invoke! app, *args
+  end
+  
+end
+
+class InvokeRubyCommand < Command
+  
+  include InvokeCommands
+  
+  def do_execute! *args
     # might have more logic in the future
-    do_invoke data_lines, 'ruby', *args
+    execute_invoke! 'ruby', *args
   end
   
-  def do_gitrepos data_lines, name
-    repos = (@repositories[name] ||= GitRepository.new(@project_dir, name))
-    data_lines.each do |subcommand, *args|
-      case subcommand.upcase
-      when 'GIT'
-        repos.add_location GitLocation.new(*args)
-      else
-        raise BuildScriptError, "Unknown repository location type #{subcommand}"
-      end
-    end
-    if override = @overrides.find { |o| o.matches? repos }
-      @repositories[name] = LocalPseudoRepository.new(override.local_dir, repos.name)
+end
+
+class GitReposCommand < Command
+  
+  def do_execute! name
+    @repos = @executor.define_repository(name) { GitRepository.new(@executor.project_dir, name) }
+    execute_subcommands!
+    if override = @executor.override_for(@repos)
+      @executor.redefine_repository! name, LocalPseudoRepository.new(override.local_dir, @repos.name)
     end
   end
   
-  def do_store data_lines, name, tags, description
-    tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
-    store = (@stores[name] ||= RemoteStore.new(@local_store, name, tags, description))
-    data_lines.each do |subcommand, *args|
-      args[0] = case args[0].strip when '-' then [] else args[0].strip.split(/\s*,\s*/) end
-      case subcommand.upcase
-      when 'SCP'
-        store.add_location! ScpLocation.new(*args)
-      when 'HTTP'
-        store.add_location! HttpLocation.new(*args)
-      when 'S3'
-        store.add_location! AmazonS3Location.new(*args)
-      else
-        raise BuildScriptError, "Unknown store location type #{subcommand}"
-      end
-    end
+  def do_git! *args
+    @repos.add_location GitLocation.new(*args)
   end
   
-  def do_version version_name, repos_name, *args
-    version_name = resolve_alias(version_name)
-    raise "Duplicate version #{name}" unless @items[version_name].nil?
-    repository = @repositories[repos_name]
-    raise "Unknown repository #{repos_name}" if repository.nil?
-    @items[version_name] = repository.create_item(version_name, *args)
-  end
+end
+
+class StoreCommand < Command
   
-  def do_new_item kind, alias_name, tags, name, description
-    name = resolve_alias(name)
-    define_alias alias_name, name unless alias_name =~ /^-?$/
+  def do_execute! name, tags, description
     tags = parse_tags(tags)
-    item = @local_store.new_item(kind, name, tags, description)
-    puts "new item defined: [#{item.name}]"
-    @items[item.name] = item
+    @store = @executor.define_store(name) { RemoteStore.new(@executor.local_store, name, tags, description) }
+    execute_subcommands!
   end
   
-  def do_existing_item kind, alias_name, tags, name, store_and_path
-    name = resolve_alias(name)
-    define_alias alias_name, name unless alias_name =~ /^-?$/
-    tags = case tags.strip when '-' then [] else tags.strip.split(/\s*,\s*/) end
+  def do_scp! *args
+    args[0] = parse_tags(args[0])
+    @store.add_location! ScpLocation.new(*args)
+  end
+  
+  def do_http! *args
+    args[0] = parse_tags(args[0])
+    @store.add_location! HttpLocation.new(*args)
+  end
+  
+  def do_s3! *args
+    args[0] = parse_tags(args[0])
+    @store.add_location! AmazonS3Location.new(*args)
+  end
+  
+end
+
+class VersionCommand < Command
+  
+  def do_execute! version_name, repos_name, *args
+    version_name = @executor.resolve_alias(version_name)
+    repository = @executor.find_repository(repos_name)
+    @executor.define_item! version_name, repository.create_item(version_name, *args)
+  end
+  
+end
+
+module ItemDefinitionCommands
+  
+  def execute_new_item! kind, alias_name, tags, name, description
+    name = @executor.resolve_alias(name)
+    @executor.define_alias alias_name, name unless alias_name =~ /^-?$/
+    tags = parse_tags(tags)
+    @executor.define_item! item.name, @executor.local_store.new_item(kind, name, tags, description)
+  end
+
+  def execute_existing_item! kind, alias_name, tags, name, store_and_path
+    name = @executor.resolve_alias(name)
+    @executor.define_alias alias_name, name unless alias_name =~ /^-?$/
+    tags = parse_tags(tags)
+    
     store_name, path = store_and_path.split('/')
-    store = @stores[store_name] or raise BuildScriptError, "Store #{store_name} not found"
-    item = store.existing_item(kind, name, tags, '')
-    puts "existing item defined: [#{item.name}]"
-    @items[item.name] = item
+    store = @executor.find_store(store_name)
+    @executor.define_item! item.name, store.existing_item(kind, name, tags, '')
   end
   
-  def do_alias name, item_name
-    define_alias name, item_name
+  
+end
+
+class NewFileCommand < Command
+  
+  include ItemDefinitionCommands
+  
+  def do_execute! alias_name, tags, name, description
+    execute_new_item! :file, alias_name, tags, name, description
   end
   
-  def define_alias name, item_name
-    @aliases[name] = resolve_alias(item_name)
+end
+
+class NewDirCommand < Command
+  
+  include ItemDefinitionCommands
+  
+  def do_execute! alias_name, tags, name, description
+    execute_new_item! :directory, alias_name, tags, name, description
   end
   
-  def do_put store_name, *item_names
-    store = @stores[store_name] or raise "PUT references unknown store '#{store_name}'"
+end
+
+class FileCommand < Command
+  
+  include ItemDefinitionCommands
+  
+  def do_execute! alias_name, tags, name, store_and_path
+    execute_existing_item! :file, alias_name, tags, name, description
+  end
+  
+end
+
+class DirCommand < Command
+  
+  include ItemDefinitionCommands
+  
+  def do_execute! alias_name, tags, name, store_and_path
+    execute_existing_item! :directory, alias_name, tags, name, description
+  end
+  
+end
+
+class AliasCommand < Command
+  
+  def do_execute! name, item_name
+    @executor.define_alias name, item_name
+  end
+  
+end
+
+class PutCommand < Command
+  
+  def do_execute! store_name, *item_names
+    store = @executor.find_store(store_name)
     item_names.each do |item_name|
-      item_name = resolve_alias(item_name)
-      item = @items[item_name] or raise "PUT references unknown item #{item_name}"
-      log "PUT of #{item.name} into #{store.name}..."
+      item_name = @executor.resolve_alias(item_name)
+      item = @executor.find_item(item_name)
+      @feedback.info "PUT of #{item.name} into #{store.name}..."
       store.put item
     end
   end
   
-  def do_unzip data_lines, src_file, dst_dir
-    specs = []
-    data_lines.each do |subcommand, *args|
-      case subcommand.upcase
-      when 'INTO' 
-        dst, src = *args
-        raise BuildScriptError, "INTO syntax error" if dst.nil? or src.nil?
-        specs << [dst, src]
-      else raise BuildScriptError, "Unknown UNZIP subcommand #{subcommand}"
-      end
-    end
-    
-    tmp_dir = "#{dst_dir}/.xtmp"
-    FileUtils.mkdir_p tmp_dir
-    FileUtils.cd tmp_dir do
-      case src_file
-      when /\.zip$/
-        invoke 'unzip', '-x', src_file
-      when /\.tar$/
-        invoke 'tar', 'xf', src_file
-      when /\.tar\.bz2$/
-        invoke 'tar', 'xjf', src_file
-      when /\.tar\.gz$/, /\.tgz$/
-        invoke 'tar', 'xzf', src_file
-      else
-        raise "Don't know how to extract #{src_file}"
-      end
-    end
-    specs.each do |dst_suffix, src_suffix|
-      src_suffix = src_suffix[1..-1] if src_suffix[0..0] == '/'
-      dst_suffix = dst_suffix[1..-1] if dst_suffix[0..0] == '/'
-      src = "#{tmp_dir}/#{src_suffix}"
-      dst = "#{dst_dir}/#{dst_suffix}"
-      raise "#{src_suffix} does not exist in #{src_file}" unless File.exists? src
-      raise "#{src_suffix} is a file, but #{dst_suffix} is already a directory when unzipping #{src_file}" if File.file?(src) && File.directory?(dst)
-      mv_merge src, dst
-    end
-    FileUtils.rm_rf(tmp_dir)
+end
+
+class SyncCommand < Command
+  
+  def do_execute! first, second
+    @mappings = []
+    execute_subcommands!
+    YourSway::Sync.synchronize parse_sync_party(first), parse_sync_party(second), mappings
   end
   
-  def do_zip data_lines, dst_file
-    specs = []
-    data_lines.each do |subcommand, *args|
-      case subcommand.upcase
-      when 'INTO' 
-        dst, src = *args
-        raise BuildScriptError, "INTO syntax error" if dst.nil? or src.nil?
-        specs << [dst, src]
-      else raise BuildScriptError, "Unknown ZIP subcommand #{subcommand}"
+  def do_map! first_prefix, first_actions, second_prefix, second_actions
+    @mappings << YourSway::Sync::SyncMapping.new(first_prefix, parse_sync_actions(first_actions),
+      second_prefix, parse_sync_actions(second_actions))
+  end
+  
+private
+
+  def parse_sync_actions actions
+    case actions
+    when 'readonly' then return []
+    when 'mirror'   then return [:add, :remove, :replace]
+    else
+      return actions.split(',').collect do |action|
+        case action
+        when 'add', 'remove', 'replace', 'update' then :"#{action}"
+        else raise BuildScriptError, "Invalid action '#{action}' in SYNC command"
+        end
       end
     end
-    
+  end
+  
+  def parse_sync_party party_name
+    party_name = @executor.resolve_alias(party_name)
+    if item = @executor.items[party_name]
+       [item.create_sync_party].each { |party| return party unless party.nil? }
+    end
+    if store = @executor.stores[party_name]
+      [store.create_sync_party].each { |party| return party unless party.nil? }
+    end
+    return YourSway::Sync::LocalParty.new(party_name) if File.directory? party_name
+    expanded_path = File.expand_path(party_name)
+    return YourSway::Sync::LocalParty.new(expanded_path) if File.directory? expanded_path
+    raise BuildScriptError, "SYNC: unrecognized party spec '#{party_name}'"
+  end
+
+end
+
+class ZipCommand < Command
+  
+  def do_execute! data_lines, dst_file
+    @specs = []
+    execute_subcommands!
+
     tmp_dir = "#{dst_file}.ztmp"
     FileUtils.mkdir_p tmp_dir
-    specs.each do |dst_suffix, src|
+    @specs.each do |dst_suffix, src|
       dst_suffix = dst_suffix[1..-1] if dst_suffix[0..0] == '/'
       dst = "#{tmp_dir}/#{dst_suffix}"
       raise "#{src} does not exist" unless File.exists? src
       raise "#{src} is a file, but #{dst_suffix} is already a directory when zipping #{src_file}" if File.file?(src) && File.directory?(dst)
       cp_merge src, dst
     end
-    
+
     FileUtils.cd tmp_dir do
       case dst_file
       when /\.zip$/
@@ -422,102 +637,116 @@ private
     FileUtils.rm_rf(tmp_dir)
   end
   
-  def do_copyto data_lines, destination_dir
-    data_lines.each do |subcommand, *subargs|
-      case subcommand
-      when 'INTO'
-        dest_suffix, src = *subargs
-        dest = File.join(destination_dir, dest_suffix)
-        raise "#{src} does not exist (in COPYTO)" unless File.exists? src
-        raise "#{src} is a file, but #{dest} is already a directory (in COPYTO)" if File.file?(src) && File.directory?(dest)
-        cp_merge src, dest
-      when 'SYMLINK'
-        dest_suffix, src = *subargs
-        dest = File.join(destination_dir, dest_suffix)
-        raise "#{src} does not exist (in COPYTO)" unless File.exists? src
-        raise "#{dest} already exists (in COPYTO)" if File.exists? dest
-        FileUtils.mkdir_p File.dirname(dest)
-        FileUtils.ln_s src, dest
+  def do_into! dst, src
+    @specs << [dst, src]
+  end
+  
+end
+
+class UnzipCommand < Command
+  
+  def do_execute! data_lines, src_file, dst_dir
+    @specs = []
+    execute_subcommands!
+
+    tmp_dir = "#{dst_dir}/.xtmp"
+    FileUtils.mkdir_p tmp_dir
+    FileUtils.cd tmp_dir do
+      case src_file
+      when /\.zip$/
+        invoke 'unzip', '-x', src_file
+      when /\.tar$/
+        invoke 'tar', 'xf', src_file
+      when /\.tar\.bz2$/
+        invoke 'tar', 'xjf', src_file
+      when /\.tar\.gz$/, /\.tgz$/
+        invoke 'tar', 'xzf', src_file
       else
-        raise BuildScriptError, "Unknown COPYTO subcommand: #{subcommand}"
+        raise "Don't know how to extract #{src_file}"
       end
     end
+    @specs.each do |dst_suffix, src_suffix|
+      src_suffix = src_suffix[1..-1] if src_suffix[0..0] == '/'
+      dst_suffix = dst_suffix[1..-1] if dst_suffix[0..0] == '/'
+      src = "#{tmp_dir}/#{src_suffix}"
+      dst = "#{dst_dir}/#{dst_suffix}"
+      raise "#{src_suffix} does not exist in #{src_file}" unless File.exists? src
+      raise "#{src_suffix} is a file, but #{dst_suffix} is already a directory when unzipping #{src_file}" if File.file?(src) && File.directory?(dst)
+      mv_merge src, dst
+    end
+    FileUtils.rm_rf(tmp_dir)
   end
   
-  def parse_sync_actions actions
-    case actions
-    when 'readonly' then return []
-    when 'mirror'   then return [:add, :remove, :replace]
-    else
-      return actions.split(',').collect do |action|
-        case action
-        when 'add', 'remove', 'replace', 'update' then :"#{action}"
-        else raise BuildScriptError, "Invalid action '#{action}' in SYNC command"
-        end
-      end
-    end
+  def do_into! dst, src
+    @specs << [dst, src]
   end
   
-  def parse_sync_party party_name
-    party_name = resolve_alias(party_name)
-    if item = @items[party_name]
-       [item.create_sync_party].each { |party| return party unless party.nil? }
-    end
-    if store = @stores[party_name]
-      [store.create_sync_party].each { |party| return party unless party.nil? }
-    end
-    return YourSway::Sync::LocalParty.new(party_name) if File.directory? party_name
-    expanded_path = File.expand_path(party_name)
-    return YourSway::Sync::LocalParty.new(expanded_path) if File.directory? expanded_path
-    raise BuildScriptError, "SYNC: unrecognized party spec '#{party_name}'"
+end
+
+class CopyToCommand < Command
+  
+  def do_execute! destination_dir
+    @destination_dir = destination_dir
+    execute_subcommands!
+ end
+  
+  def do_into! dest_suffix, src
+    dest = File.join(@destination_dir, dest_suffix)
+    raise "#{src} does not exist (in COPYTO)" unless File.exists? src
+    raise "#{src} is a file, but #{dest} is already a directory (in COPYTO)" if File.file?(src) && File.directory?(dest)
+    cp_merge src, dest
   end
   
-  def do_sync data_lines, first, second
-    mappings = []
-    data_lines.each do |subcommand, *args|
-      case subcommand.upcase
-      when 'MAP' 
-        first_prefix, first_actions, second_prefix, second_actions = *args
-        raise BuildScriptError, "MAP subcommand of SYNC command has incorrect syntax" if second_actions.nil?
-        
-        mappings << YourSway::Sync::SyncMapping.new(first_prefix, parse_sync_actions(first_actions),
-          second_prefix, parse_sync_actions(second_actions))
-      else raise BuildScriptError, "Unknown ZIP subcommand #{subcommand}"
-      end
-    end
-    
-    YourSway::Sync.synchronize parse_sync_party(first), parse_sync_party(second), mappings
+  def do_symlink! dest_suffix, src
+    dest = File.join(@destination_dir, dest_suffix)
+    raise "#{src} does not exist (in COPYTO)" unless File.exists? src
+    raise "#{dest} already exists (in COPYTO)" if File.exists? dest
+    FileUtils.mkdir_p File.dirname(dest)
+    FileUtils.ln_s src, dest
   end
+
+end
+
+class FixPlistCommand < Command
   
-  def do_fix_plist data_lines, file
+  def do_execute! file
     lines = File.read(file).split("\n")
-    data_lines.each do |subcommand, header, value|
-      case subcommand
-      when 'FIX'
-        lines.each { |$_| gsub!(/<string>([^<]+)<\/string>/) { "<string>#{value}</string>" } if ($_ =~ /<key>#{header}<\/key>/) ... (/<key>/) }
-      else
-        raise "Unknown FIXPLIST subcommand: #{subcommand}"
-      end
-    end
+    execute_subcommands! lines
     File.open(file, 'w') { |f| f.write(lines.join("\n")) }
   end
   
-  def do_subst_vars data_lines, file
-    additional_variables = {}
-    data_lines.each do |subcommand, key, value|
-      case subcommand
-      when 'SET'
-        additional_variables[key] = subst(value, additional_variables)
-      else
-        raise "Unknown SUBSTVARS subcommand: #{subcommand}"
-      end
-    end
+  def do_fix! lines
+    lines.each { |$_| gsub!(/<string>([^<]+)<\/string>/) { "<string>#{value}</string>" } if ($_ =~ /<key>#{header}<\/key>/) ... (/<key>/) }
+  end
+  
+end
+
+class SubstVarsCommand < Command
+  
+  def do_execute! data_lines, file
+    @additional_variables = {}
+    execute_subcommands!
     data = File.read(file)
-    data = subst(data, additional_variables)
+    data = subst_variables(data, @additional_variables)
     File.open(file, 'w') { |f| f.write data}
   end
   
-  def do_nsis_file_list source_dir, inst_file, uninst_file
+  def do_set! key, value
+    @additional_variables[key] = value
+  end
+  
+private
+  
+  def subst_variables text
+    collect_refs_in(text).uniq.each { |var| @additional_variables[var] ||= @executor.resolve_variable(var) }
+    subst_refs_in(text, @additional_variables)
+  end
+  
+end
+
+class NsisFileListCommand < Command
+  
+  def do_execute! source_dir, inst_file, uninst_file
     files = list_entries_recursively(source_dir)
     common_prefix = File.join(source_dir, 'x')[0..-2] # a trick to add a trailing slash
     last_dir = source_dir = common_prefix[0..-2] # without a slash
@@ -547,7 +776,11 @@ private
     end
   end
   
-  def do_sleep delay
+end
+
+class SleepCommand < Command
+  
+  def do_execute! delay
     delay = delay.to_i
     while delay > 0
       sleep 1
@@ -555,13 +788,11 @@ private
     end
   end
   
-  def resolve_alias name
-    @aliases[name] || name
-  end
+end
+
+class NopCommand < Command
   
-  def parse_tags tags_str
-    tags_str = (tags_str || '').strip
-    return case tags_str when '', '-' then [] else tags_str.split(/\s*,\s*/) end
+  def do_execute! 
   end
   
 end
