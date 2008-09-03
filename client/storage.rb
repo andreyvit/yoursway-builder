@@ -17,21 +17,25 @@ end
 module LocalItem
   
   def obliterate_completely!
-    path = @store.fetch_locally(self)
+    path = @store.path_of(self)
     FileUtils.rm_rf path
   end
   
   def bring_parent_to_life!
-    path = @store.fetch_locally(self)
+    path = @store.path_of(self)
     FileUtils.mkdir_p File.dirname(path)
   end
   
   def bring_me_to_life!
-    path = @store.fetch_locally(self)
+    path = @store.path_of(self)
     initialize_new_location path
   end
   
   def in_local_store?
+    true
+  end
+  
+  def is_fetching_very_fast?
     true
   end
   
@@ -49,9 +53,13 @@ class StoreItem < Item
     @used = false
   end
   
-  def fetch_locally
+  def fetch_locally feedback
     @used = true
-    return @store.fetch_locally(self)
+    return @store.fetch_locally(self, feedback)
+  end
+  
+  def is_fetching_very_fast?
+    @store.is_fetching_very_fast?(self)
   end
   
   def used?
@@ -112,8 +120,12 @@ class Location
     :url == kind
   end
   
-  def put item
+  def put item, feedback
     raise "#{self.class.name} does not support puts, so cannot put #{item.name}"
+  end
+  
+  def is_fetching_very_fast? item
+    false
   end
     
 end
@@ -140,6 +152,10 @@ class LocalFileSystemLocation < Location
     "#{@builder_name}:#{File.join(@path, item.name)}"
   end
   
+  def is_fetching_very_fast? item
+    true
+  end
+  
 end
 
 class HttpLocation < Location
@@ -161,32 +177,41 @@ class HttpLocation < Location
     return uri.to_s
   end
   
-  def fetch_locally_into item, local_path
+  def fetch_locally_into item, local_path, feedback
     raise "Fetching directories via HTTP is not supported" if item.directory?
 
     uri = URI::parse(@url)
     uri.path = "#{uri.path}/#{item.name}"
+    feedback.action "Downloading from #{uri}..."
 
     FileUtils.mkdir_p(File.dirname(local_path))
-    catch(:successfully_done) do
-      response = with_automatic_retries(5) do
+    begin
+      with_automatic_retries(5) do
         File.open(local_path, 'wb') do |file|
           http = Net::HTTP.new(uri.host, uri.port.to_i)
           http.use_ssl = (uri.scheme == 'https')
           http.start do
             http.request_get(uri.request_uri) do |response|
-              next response unless Net::HTTPOK === response
-              response.read_body do |chunk|
-                file.write(chunk)
+              raise HttpError.new(response.code) unless Net::HTTPOK === response
+              len = response.content_length
+              done = 0
+              begin
+                feedback.command_output "#{item.name}..."
+                response.read_body do |chunk|
+                  file.write(chunk)
+                  done += chunk.length
+                  feedback.command_output "\r#{item.name}... #{done.format_size_of_size(len, 1)}     "
+                end
+              ensure
+                feedback.command_output "\n"
               end
-              throw :successfully_done
             end
           end
         end
       end
+    rescue Exception
       File.unlink(local_path)
-      raise "Could not download #{uri}: error #{response.code}" if response
-      raise "Could not download #{uri}"
+      raise
     end
   end
   
@@ -207,18 +232,20 @@ class ScpLocation < Location
     "#{@path}/#{item.name}"
   end
   
-  def put item
-    local_path = item.fetch_locally
-    invoke 'scp', '-r', local_path, "#{@path}/#{item.name}"
+  def put item, feedback
+    local_path = item.fetch_locally(feedback)
+    feedback.action "Uploading #{item.name} into #{@path}/ via SCP..."
+    invoke feedback, 'scp', '-r', local_path, "#{@path}/#{item.name}"
   end
   
-  def fetch_locally_into item, local_path
+  def fetch_locally_into item, local_path, feedback
     FileUtils.mkdir_p(File.dirname(local_path))
+    feedback.action "Downloading #{item.name} from #{@path}/ via SCP..."
     if item.file?
-      invoke 'scp', "#{@path}/#{item.name}", local_path
+      invoke feedback, 'scp', "#{@path}/#{item.name}", local_path
     else
       FileUtils.mkdir_p local_path
-      invoke 'scp', '-r', "#{@path}/#{item.name}", local_path
+      invoke feedback, 'scp', '-r', "#{@path}/#{item.name}", local_path
     end
   end
   
@@ -244,14 +271,15 @@ class AmazonS3Location < Location
     "#{@bucket}:#{@key_prefix}#{item.name}"
   end
   
-  def put item
+  def put item, feedback
     raise "cannot upload a directory to S3 (not supported yet, and not needed)" if item.directory?
-    local_path = item.fetch_locally
+    local_path = item.fetch_locally(feedback)
     s3 = AmazonS3.new(@access_key, @secret_access_key)
+    feedback.action "Uploading #{item.name} into #{@bucket}:#{@key_prefix} on Amazon S3..."
     s3.put_file @bucket, "#{@key_prefix}#{item.name}", local_path
   end
   
-  def fetch_locally_into item, local_path
+  def fetch_locally_into item, local_path, feedback
     raise "GETs from Amazon S3 are not supported (please set up an HTTP location for GETs)"
   end
   
@@ -292,8 +320,12 @@ class LocalStore < Store
     @item_stores = {}
   end
   
-  def fetch_locally item
+  def fetch_locally item, feedback
     return path_of(item)
+  end
+  
+  def is_fetching_very_fast? item
+    true
   end
   
   def path_of item
@@ -320,11 +352,15 @@ class LocalStore < Store
     (@item_stores[item] ||= []) << store
   end
   
-  def fetch_remote_item item, remote_store
+  def fetch_remote_item item, remote_store, feedback
     path = path_of(item)
     return path if File.exists?(path)
-    remote_store.fetch_locally_into(item, path)
+    remote_store.fetch_locally_into(item, path, feedback)
     return path
+  end
+  
+  def has_remote_item? item
+    File.exists?(path_of(item))
   end
   
   def local?
@@ -348,17 +384,21 @@ class RemoteStore < Store
      return item
   end
   
-  def put item
-    @locations.first.put item
+  def put item, feedback
+    @locations.first.put item, feedback
     item.has_been_put_into self
   end
   
-  def fetch_locally item
-    return @local_store.fetch_remote_item(item, self)
+  def fetch_locally item, feedback
+    return @local_store.fetch_remote_item(item, self, feedback)
   end
   
-  def fetch_locally_into item, local_path
-    @locations.last.fetch_locally_into item, local_path
+  def is_fetching_very_fast? item
+    @locations.last.is_fetching_very_fast?(item) or @local_store.has_remote_item?(item)
+  end
+  
+  def fetch_locally_into item, local_path, feedback
+    @locations.last.fetch_locally_into item, local_path, feedback
   end
   
   def local?

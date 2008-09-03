@@ -2,7 +2,7 @@
 class RepositoryItem
   
   def create_sync_party
-    YourSway::Sync::LocalParty.new(self.fetch_locally)
+    raise "Repository items are not supported by sync"
   end
   
 end

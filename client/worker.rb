@@ -155,7 +155,21 @@ class ServerCommunication
       message_done_uri(message_id), data.merge('token' => 42)
   end
   
+  def send_console message_id, data
+    begin
+      try_network_operation do
+        Net::HTTP.post_form message_progress_uri(message_id), 'console' => data
+      end
+    rescue NetworkError => e
+      puts "#{e.message}, could not send console log."
+    end
+  end
+  
 private
+
+  def message_progress_uri(message_id)
+    URI.parse("http://#{@server_host}/messages/%s/report_progress" % message_id)
+  end
 
   def message_done_uri(message_id)
     URI.parse("http://#{@server_host}/builders/#{@builder_name}/messages/%s/done" % message_id)
@@ -207,17 +221,29 @@ end
 
 class ConsoleFeedback
   
+  def initialize
+    @on_prev_line = false
+  end
+  
+  def puts *data
+    $stdout.puts if @on_prev_line
+    $stdout.puts *data
+    @on_prev_line = false
+  end
+  
   def start_job id
     puts "Starting job #{id}"
   end
   
-  def start_command command, complexity
-    raise "Invalid complexity #{complexity}" unless [:short, :long].include?(complexity)
-    puts "Starting command #{command}"
+  def start_command command, is_long
+    return unless is_long
+    puts
+    puts "COMMAND: #{command}"
   end
   
-  def finished_command
-    puts "Finished command."
+  def action message
+    puts
+    puts "ACTION: #{message}"
   end
   
   def job_done id, options
@@ -233,7 +259,11 @@ class ConsoleFeedback
   end
   
   def command_output output
-    puts output
+    $stdout.print output
+    @on_prev_line = !(output =~ /\n\Z/)
+  end
+  
+  def command_still_running
   end
   
   def error message
@@ -250,16 +280,39 @@ class NetworkFeedback
   
   def initialize communicator
     @communicator = communicator
+    @log_lines = []
+    @last_time = nil
+    @feedback_interval = 2
+    @last_output_was_from_command = false
   end
   
   def start_job id
     @job_id = id
   end
   
-  def start_command command, complexity
+  def add_lines! *lines
+    @log_lines.push *lines
+    @last_output_was_from_command = false
+    check_flush!
+  end
+  alias add_line! add_lines!
+  
+  def check_flush!
+    @log_lines = @log_lines[-20..-1] if @log_lines.length > 20
+    now = Time.new
+    if @job_id && (@last_time.nil? or (now - @last_time >= @feedback_interval))
+      @communicator.send_console @job_id, @log_lines.join("\n")
+      @last_time = now
+    end
   end
   
-  def finished_command
+  def start_command command, is_long
+    return unless is_long
+    add_lines! "", "COMMAND: #{command}"
+  end
+  
+  def action message
+    add_lines! "", "ACTION: #{message}"
   end
   
   def job_done id, options
@@ -267,12 +320,28 @@ class NetworkFeedback
   end
   
   def command_output output
+    lines = output.split("\n")
+    if @last_output_was_from_command
+      if !@log_lines.empty? && lines.first =~ /\r([^\r]+)\Z/
+        @log_lines[-1] = $1
+        lines.shift
+      end
+    end
+    @last_output_was_from_command = !(lines.last =~ /\n\Z/)
+    @log_lines.push *lines
+    check_flush!
+  end
+  
+  def command_still_running
+    check_flush!
   end
   
   def error message
+    add_line! "ERROR: #{message}"
   end
   
   def info message
+    add_line! message
   end
   
 end

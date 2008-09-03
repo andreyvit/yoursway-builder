@@ -5,7 +5,7 @@ require File.join(File.dirname(__FILE__), 'commons.rb')
 
 class GitItem < RepositoryItem
   
-  attr_reader :version
+  attr_reader :version, :name
   
   def initialize repository, name, version
     @repository = repository
@@ -14,8 +14,8 @@ class GitItem < RepositoryItem
     @path = nil
   end
   
-  def fetch_locally
-    return @repository.fetch_version(self)
+  def fetch_locally feedback
+    return @repository.fetch_version(self, feedback)
   end
 
 end
@@ -76,28 +76,28 @@ class GitRepository
     GitItem.new(self, name, parse_version(*spec))
   end
   
-  def fetch_version(item)
+  def fetch_version(item, feedback)
     folder = File.join(@project_dir, @name)
-    prefetch_locally folder
+    prefetch_locally folder, feedback
     FileUtils.cd(folder) do
-      invoke('git', 'reset', '--hard', item.version.ref_name(@definitive_location.name))
+      invoke(feedback, 'git', 'reset', '--hard', item.version.ref_name(@definitive_location.name))
     end
     return folder
   end
 
 private
   
-  def prefetch_locally(folder)
+  def prefetch_locally(folder, feedback)
     return if @prefetched
     @prefetched = true
     
     FileUtils.mkdir_p folder
     Dir.chdir folder
-    invoke('git', 'init') rescue nil
+    invoke(feedback, 'git', 'init') rescue nil
     locations = @locations.select { |loc| GitLocation === loc }.sort { |b, a| a.score <=> b.score }
     locations.each do |loc|
-      invoke('git', 'remote', 'add', loc.name, loc.url) rescue nil
-      invoke('git', 'fetch', loc.name)
+      invoke(feedback, 'git', 'remote', 'add', loc.name, loc.url) rescue nil
+      invoke(feedback, 'git', 'fetch', loc.name)
     end
     @definitive_location = locations.last
   end
@@ -128,7 +128,7 @@ class LocalPseudoRepository
     GitItem.new(self, name, LocalPseudoVersion.new)
   end
 
-  def fetch_version(item)
+  def fetch_version item, feedback
     @local_dir
   end
   

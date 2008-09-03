@@ -1,15 +1,56 @@
+require 'pty'
+$VERBOSE=nil
 
 ['commons', 'ys_s3', 'storage', 'git', 'sync', 'storage_sync'].each { |file_name| require file_name }
 
-def invoke cmd, *args
+def spawn_using_pty feedback, cmd, *args
+  PTY.spawn(cmd, *args) do |r,w,cid|
+    begin
+      loop do
+        begin
+          l = r.readpartial(1024)
+        rescue EOFError
+          break
+        end
+        feedback.command_output l
+      end
+      begin
+        # try to invoke waitpid() before the signal handler does it
+        return Process::waitpid2(cid)[1].exitstatus
+      rescue Errno::ECHILD    
+        # the signal handler managed to call waitpid() first;
+        # PTY::ChildExited will be delivered pretty soon, so just wait for it
+        sleep 1
+      end
+    rescue PTY::ChildExited => e
+      return e.status.exitstatus
+    end
+    # should never happen
+    raise "Internal error: failure to obtain exit code of a process"
+  end
+end
+
+def spawn_using_system feedback, cmd, *args
+  if system(cmd, *args) then 0 else $?.exitstatus end
+end
+
+def invoke feedback, cmd, *args
   args = [''] if args.empty?
   msg = "INVOKE #{cmd}#{args.collect {|a| "\n  ARG #{a}"}.join('')}"
-  log msg
-  if not system(cmd, *args) 
+  feedback.info msg
+
+  begin
+    exit_code = spawn_using_pty(feedback, cmd, *args)
+  rescue NotImplementedError
+    feedback.info "Falling back to system() because forking is not supported."
+    exit_code = spawn_using_system(feedback, cmd, *args)
+  end
+  
+  if exit_code != 0
     basename = File.basename(cmd)
-    summary = case $?.exitstatus
+    summary = case exit_code
         when 127 then "'#{basename}' not found"
-        else          "'#{basename}' failed with code #{$?.exitstatus}"
+        else          "'#{basename}' failed with code #{exit_code}"
     end
     raise "#{summary}\n#{msg}"
   end
@@ -116,15 +157,6 @@ class Executor
   end
   
   def new_command command, args, data_lines
-    @feedback.start_command command, :long
-    begin
-      return do_new_command(command, args, data_lines)
-    ensure
-      @feedback.finished_command
-    end
-  end
-  
-  def do_new_command command, args, data_lines
     (@actions[command.upcase] or raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})").new(self, data_lines, args)
   end
   
@@ -210,10 +242,11 @@ class Executor
       break if refs.empty?
       
       values = {}
-      refs.each { |ref, tags| values[ref] = resolve_ref(ref, tags) }
+      refs.each { |ref| values[ref.name] = resolve_ref(ref) }
       command.subst_refs! values
     end
     
+    @feedback.start_command command, command.is_long?
     command.execute! self, @feedback
   end
 
@@ -236,15 +269,17 @@ private
     end
   end
   
-  def get_item name, tags
-    name = resolve_alias(name)
+  def get_item ref
+    name = resolve_alias(ref.name)
     item = @items[name] or return nil
     if item.in_local_store? && !item.used?
       item.bring_parent_to_life!
-      item.obliterate_completely! unless tags.include?('keep')
-      item.bring_me_to_life! if tags.include?('mkdir')
+      item.obliterate_completely! unless ref.tagged_with?('keep')
+      item.bring_me_to_life! if ref.tagged_with?('mkdir')
     end
-    item.fetch_locally
+    return item.fetch_locally(@feedback) if item.is_fetching_very_fast?
+    @feedback.action "Fetching item #{item.name}..."
+    item.fetch_locally @feedback
   end
   
   def parse_tags tags_str
@@ -256,8 +291,23 @@ private
     @variables[name] or raise ExecutionError.new("Undefined variable [#{ref}]")
   end
   
-  def resolve_ref ref, tags
-    @variables[ref] or get_item(ref, tags) or raise ExecutionError.new("Undefined variable or item [#{ref}]")
+  def resolve_ref ref
+    @variables[ref.name] or get_item(ref) or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
+  end
+  
+end
+
+class Ref
+  
+  attr_reader :name, :tags
+  
+  def initialize name, tags
+    @name = name
+    @tags = tags
+  end
+  
+  def tagged_with? tag
+    @tags.include? tag
   end
   
 end
@@ -265,6 +315,12 @@ end
 class Command
   
   PATTERN = /\[([^\[\]<]+)(?:<([^>]*)>)?\]/
+  
+  def is_long?; true; end
+  
+  def self.acts_as_short
+    define_method(:is_long?) { false }
+  end
   
   def self.command_names
     return [const_get('KEYWORD')] if const_defined?('KEYWORD')
@@ -292,7 +348,7 @@ class Command
   end
   
   def to_s
-    "#{KEYWORD}"
+    command_name
   end
   
   def execute! executor, feedback
@@ -327,7 +383,7 @@ private
 
   def collect_refs_in string
     result = []
-    string.scan(PATTERN) { |ref, tags| result << [ref, parse_tags(tags)] }
+    string.scan(PATTERN) { |ref, tags| result << Ref.new(ref, parse_tags(tags)) }
     return result
   end
 
@@ -352,7 +408,7 @@ private
   end
   
   def invoke! *args
-    invoke *args
+    invoke @feedback, *args
   end
   
 end
@@ -368,6 +424,8 @@ end
 
 class ProjectCommand < Command
   
+  acts_as_short
+  
   def do_execute! permalink, name
     @executor.set_project! permalink, name
   end
@@ -375,6 +433,8 @@ class ProjectCommand < Command
 end
 
 class SetCommand < Command
+  
+  acts_as_short
   
   def do_execute! name, value
     @executor.define_variable name, value
@@ -426,6 +486,8 @@ end
 
 class GitReposCommand < Command
   
+  acts_as_short
+  
   def do_execute! name
     @repos = @executor.define_repository(name) { GitRepository.new(@executor.project_dir, name) }
     execute_subcommands!
@@ -441,6 +503,8 @@ class GitReposCommand < Command
 end
 
 class StoreCommand < Command
+  
+  acts_as_short
   
   def do_execute! name, tags, description
     tags = parse_tags(tags)
@@ -467,6 +531,8 @@ end
 
 class VersionCommand < Command
   
+  acts_as_short
+  
   def do_execute! version_name, repos_name, *args
     version_name = @executor.resolve_alias(version_name)
     repository = @executor.find_repository(repos_name)
@@ -477,11 +543,15 @@ end
 
 module ItemDefinitionCommands
   
+  def included(klass)
+    klass.send(:acts_as_short)
+  end
+  
   def execute_new_item! kind, alias_name, tags, name, description
     name = @executor.resolve_alias(name)
     @executor.define_alias alias_name, name unless alias_name =~ /^-?$/
     tags = parse_tags(tags)
-    @executor.define_item! item.name, @executor.local_store.new_item(kind, name, tags, description)
+    @executor.define_item! name, @executor.local_store.new_item(kind, name, tags, description)
   end
 
   def execute_existing_item! kind, alias_name, tags, name, store_and_path
@@ -491,7 +561,7 @@ module ItemDefinitionCommands
     
     store_name, path = store_and_path.split('/')
     store = @executor.find_store(store_name)
-    @executor.define_item! item.name, store.existing_item(kind, name, tags, '')
+    @executor.define_item! name, store.existing_item(kind, name, tags, '')
   end
   
   
@@ -522,7 +592,7 @@ class FileCommand < Command
   include ItemDefinitionCommands
   
   def do_execute! alias_name, tags, name, store_and_path
-    execute_existing_item! :file, alias_name, tags, name, description
+    execute_existing_item! :file, alias_name, tags, name, store_and_path
   end
   
 end
@@ -539,6 +609,8 @@ end
 
 class AliasCommand < Command
   
+  acts_as_short
+  
   def do_execute! name, item_name
     @executor.define_alias name, item_name
   end
@@ -553,7 +625,7 @@ class PutCommand < Command
       item_name = @executor.resolve_alias(item_name)
       item = @executor.find_item(item_name)
       @feedback.info "PUT of #{item.name} into #{store.name}..."
-      store.put item
+      store.put item, @feedback
     end
   end
   
@@ -606,7 +678,7 @@ end
 
 class ZipCommand < Command
   
-  def do_execute! data_lines, dst_file
+  def do_execute! dst_file
     @specs = []
     execute_subcommands!
 
@@ -623,13 +695,13 @@ class ZipCommand < Command
     FileUtils.cd tmp_dir do
       case dst_file
       when /\.zip$/
-        invoke 'zip', '-r', dst_file, *list_entries(tmp_dir)
+        invoke! 'zip', '-r', dst_file, *list_entries(tmp_dir)
       when /\.tar$/
-        invoke 'tar', 'cf', dst_file, *list_entries(tmp_dir)
+        invoke! 'tar', 'cf', dst_file, *list_entries(tmp_dir)
       when /\.tar\.bz2$/
-        invoke 'tar', 'cjf', dst_file, *list_entries(tmp_dir)
+        invoke! 'tar', 'cjf', dst_file, *list_entries(tmp_dir)
       when /\.tar\.gz$/, /\.tgz$/
-        invoke 'tar', 'czf', dst_file, *list_entries(tmp_dir)
+        invoke! 'tar', 'czf', dst_file, *list_entries(tmp_dir)
       else
         raise "Don't know how to compress into #{dst_file}"
       end
@@ -645,7 +717,7 @@ end
 
 class UnzipCommand < Command
   
-  def do_execute! data_lines, src_file, dst_dir
+  def do_execute! src_file, dst_dir
     @specs = []
     execute_subcommands!
 
@@ -654,13 +726,13 @@ class UnzipCommand < Command
     FileUtils.cd tmp_dir do
       case src_file
       when /\.zip$/
-        invoke 'unzip', '-x', src_file
+        invoke! 'unzip', '-x', src_file
       when /\.tar$/
-        invoke 'tar', 'xf', src_file
+        invoke! 'tar', 'xf', src_file
       when /\.tar\.bz2$/
-        invoke 'tar', 'xjf', src_file
+        invoke! 'tar', 'xjf', src_file
       when /\.tar\.gz$/, /\.tgz$/
-        invoke 'tar', 'xzf', src_file
+        invoke! 'tar', 'xzf', src_file
       else
         raise "Don't know how to extract #{src_file}"
       end
@@ -723,7 +795,7 @@ end
 
 class SubstVarsCommand < Command
   
-  def do_execute! data_lines, file
+  def do_execute! file
     @additional_variables = {}
     execute_subcommands!
     data = File.read(file)
@@ -781,10 +853,11 @@ end
 class SleepCommand < Command
   
   def do_execute! delay
-    delay = delay.to_i
+    delay = delay.to_f
     while delay > 0
-      sleep 1
-      delay -= 1
+      @feedback.info "Sleeping, #{delay} seconds left..."
+      sleep 0.5
+      delay -= 0.5
     end
   end
   

@@ -13,6 +13,36 @@ class Generator
   end
 end
 
+class Integer
+  
+  def choose_size_multiplier
+    if self < 1024
+      [1, "B"]
+    elsif self < 1024*1024
+      [1024, "KiB"]
+    else
+      [1204*1024, "MiB"]
+    end
+  end
+  
+  def format_size digits=0
+    div, name = choose_size_multiplier
+    digits = 0 if div == 1
+    sprintf("%.#{digits}f #{name}", (self * 1.0 / div))
+  end
+  
+  def format_size_of_size total_size, digits=0
+    div1, name1 = self.choose_size_multiplier
+    div2, name2 = total_size.choose_size_multiplier
+    if div1 == div2
+      "#{sprintf("%.#{digits}f", self*1.0/div1)} / #{sprintf("%.#{digits}f", total_size*1.0/div2)} #{name1}"
+    else
+      "#{self.format_size(digits)} / #{total_size.format_size(digits)}"
+    end
+  end
+  
+end
+
 module YourSway
   
   class PathMapping

@@ -175,11 +175,20 @@ YourSway.Response.UpdateDiv = function(id) {
   };
 };
 
+YourSway.Response.UpdateLogDiv = function(id) {
+  return function(text) {
+    var div = $(id);
+    div.innerHTML = text;
+    // window.setTimeout(function() {
+      div.scrollTop = div.scrollHeight;
+    // }, 150);
+  };
+};
 // id, period, url, timeout
 function periodically_update(options) {
   new YourSway.PeriodicExecutor({
     requestor: YourSway.AjaxRequestor(options.url),
-    handler: YourSway.Response.UpdateDiv(options.id),
+    handler: YourSway.Response.UpdateLogDiv(options.id),
     period: options.period || 2000,
     timeout: options.timeout || 10000
   });
