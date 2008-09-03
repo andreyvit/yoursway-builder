@@ -222,12 +222,13 @@ class ConsoleFeedback
   
   def job_done id, options
     outcome = options[:outcome]
+    failure_reason = options[:failure_reason]
     if outcome == 'SUCCESS'
       puts "Successfully finished job #{id}"
     else
-      puts "FAILURE REASON (message id #{message_id})\n"
+      puts "FAILURE REASON (message id #{id})\n"
       puts "#{failure_reason}"
-      puts "END FAILURE REASON (message id #{message_id})"
+      puts "END FAILURE REASON (message id #{id})"
     end
   end
   
@@ -262,7 +263,7 @@ class NetworkFeedback
   end
   
   def job_done id, options
-    @comm.job_done id, options
+    @communicator.job_done id, options
   end
   
   def command_output output
@@ -294,7 +295,7 @@ comm = ServerCommunication.new(feedback, config.server_host, config.builder_name
 class ExecutionError < Exception
 end
 
-def process_job feedback, builder_name, message_id
+def process_job feedback, builder_name, message_id, other_lines
   feedback.start_job message_id
   report = nil
   outcome = "SUCCESS"
@@ -371,7 +372,7 @@ while not interrupted
       exit!(55)
     else
       message_id = args[1]
-      process_job Multicast.new(feedback, NetworkFeedback.new(comm)), config.builder_name, message_id
+      process_job Multicast.new(feedback, NetworkFeedback.new(comm)), config.builder_name, message_id, other_lines
     end
   end
 end

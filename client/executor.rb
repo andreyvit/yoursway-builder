@@ -87,8 +87,9 @@ end
 
 class Executor
   
-  def initialize builder_name
+  def initialize builder_name, feedback
     @builder_name = builder_name # used to make create a local store name
+    @feedback = feedback
     @variables = {}
     @repositories = {}
     @stores = {}
@@ -103,6 +104,15 @@ class Executor
   end
   
   def execute command, args, data_lines
+    @feedback.start_command command, :long
+    begin
+      do_execute command, args, data_lines
+    ensure
+      @feedback.finished_command
+    end
+  end
+  
+  def do_execute command, args, data_lines
     args.collect! { |arg| subst(arg) }
     data_lines.each { |line|
       line.collect! { |arg| subst(arg) }

@@ -200,8 +200,16 @@ class Build(db.Model):
     
   def check_abandoning(self, build_abandoned_after):
     if self.state == BUILD_INPROGRESS and self._since_start > timedelta(seconds = build_abandoned_after):
-      self.state = BUILD_ABANDONED
-      self.put()
+      self.abandon_and_put()
+        
+  def abandon_and_put(self):
+    logging.info("Build(%s).abandon_and_put()" % self.version)
+    self.state = BUILD_ABANDONED
+    self.put()
+    
+    messages = self.messages.filter('state =', MESSAGE_INPROGRESS).fetch(100)
+    for message in messages:
+      message.abandon_and_put()
     
   def stores(self):
     return self._stores
@@ -237,6 +245,14 @@ class Message(db.Model):
   created_at = db.DateTimeProperty(auto_now_add = True)
   body = db.TextProperty()
   state = db.IntegerProperty(default = 0)
+  
+  def abandon_and_put(self):
+    logging.info("Message(%s).abandon_and_put()" % self.key())
+    self.state = MESSAGE_ABANDONED
+    self.put()
+    
+    key = "progress-%s" % (self.key())
+    memcache.set(key, "FIN", time = 60*60)
 
 class Account(db.Model):
   user = db.UserProperty()
@@ -676,17 +692,15 @@ class BuilderObtainWorkHandler(BaseHandler):
     message = None
     if self.builder.is_saved():
       # handle stale messages
-      stale_messages = self.builder.messages.filter('state =', 1).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
+      stale_messages = self.builder.messages.filter('state =', MESSAGE_INPROGRESS).filter('created_at <', (self.now - timedelta(seconds = 60*60))).order('created_at').fetch(100)
       for message in stale_messages:
-        message.state = 3
-        message.put()
+        message.abandon_and_put()
         
       # handle stale builds
       stale_builds = Build.all().filter('builder =', self.builder).filter('state =', BUILD_INPROGRESS).fetch(1000)
       logging.info("found %d stale build(s)" % len(stale_builds))
       for build in stale_builds:
-        build.state = BUILD_ABANDONED
-        build.put()
+        build.abandon_and_put()
         
       # check for selfupdate request
       if self.builder.self_update_requested:
@@ -702,7 +716,7 @@ class BuilderObtainWorkHandler(BaseHandler):
       self.response.out.write("IDLE\tv1\t%d" % self.config.builder_poll_interval)
       self.builder.busy = False
     else:
-      message.state = 1
+      message.state = MESSAGE_INPROGRESS
       message.put()
       build = message.build
       build.state = BUILD_INPROGRESS
@@ -731,7 +745,7 @@ class BuilderMessageDoneHandler(BaseHandler):
     if message.builder.key() != self.builder.key():
       self.invalid_request("The chosen message %s belongs to another builder" % message_key)
 
-    message.state = 2
+    message.state = MESSAGE_DONE
     message.put()
     
     build = message.build
@@ -746,7 +760,7 @@ class BuilderMessageDoneHandler(BaseHandler):
     else:
       build.state = BUILD_ABANDONED
     build.put()
-    
+
     key = "progress-%s" % (message_key)
     memcache.set(key, "FIN", time = 60*60)
 
@@ -768,6 +782,8 @@ class MessageConsoleHandler(BaseHandler):
       self.response.out.write("<script>reload_page()</script>Reloading page...")
     else:
       self.response.out.write("%s" % value)
+      
+  get = post
 
 class ServerConfigHandler(BaseHandler):
   @prolog(config_needed = False, required_level = ADMIN_LEVEL)
