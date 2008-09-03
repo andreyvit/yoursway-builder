@@ -12,10 +12,15 @@ class GitItem < RepositoryItem
     @name = name
     @version = version
     @path = nil
+    @fetched_path = nil
   end
   
   def fetch_locally feedback
-    return @repository.fetch_version(self, feedback)
+    @fetched_path ||= @repository.fetch_version(self, feedback)
+  end
+  
+  def is_fetching_very_fast?
+    !@fetched_path.nil?
   end
 
 end
@@ -96,6 +101,8 @@ private
     invoke(feedback, 'git', 'init') rescue nil
     locations = @locations.select { |loc| GitLocation === loc }.sort { |b, a| a.score <=> b.score }
     locations.each do |loc|
+      # remove the remote in case the URL has changed
+      invoke(feedback, 'git', 'config', '--remove-section', "remote.#{loc.name}") rescue nil
       invoke(feedback, 'git', 'remote', 'add', loc.name, loc.url) rescue nil
       invoke(feedback, 'git', 'fetch', loc.name)
     end
