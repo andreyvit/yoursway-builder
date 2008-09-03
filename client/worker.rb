@@ -19,8 +19,42 @@ require 'optparse'
 BUILDER_ROOT = File.expand_path(File.dirname(__FILE__))
 Dir.chdir BUILDER_ROOT
 $:.unshift BUILDER_ROOT
-COLON_BEFORE_EXECUTOR_LEN = $:.length
+
+class Reloader
+  
+  def initialize
+    @prev_length = $:.length
+    @recorded_modules = []
+  end
+  
+  def record! file_spec
+    expanded_path = File.expand_path(file_spec)
+    if expanded_path[0..BUILDER_ROOT.length-1] == BUILDER_ROOT && File.exists?(expanded_path)
+      @recorded_modules << [expanded_path, File.mtime(expanded_path)]
+    end
+  end
+  
+  def record_all_required!
+    file_specs = $"[@prev_length..-1]
+    file_specs.each do |file_spec|
+      record! file_spec
+    end
+  end
+  
+  def reload_needed?
+    @recorded_modules.any? { |file, mtime| File.mtime(file) != mtime }
+  end
+  
+  def check_and_maybe_quit!
+    exit! 22 if reload_needed?
+  end
+  
+end
+
+$reloader = Reloader.new
 require 'executor'
+$reloader.record_all_required!
+$reloader.record! __FILE__
 
 class Config
   attr_accessor :server_host, :builder_name
@@ -111,6 +145,8 @@ def try_network_operation
 end
 
 while not interrupted
+  $reloader.check_and_maybe_quit!
+  
   res = try_network_operation do
     Net::HTTP.post_form(obtain_work_uri, {'token' => 42})
   end
@@ -149,16 +185,6 @@ while not interrupted
         report = nil
         outcome = "SUCCESS"
         begin
-          # enable reloading of all local sources
-          Dir.chdir BUILDER_ROOT
-          dummy = []
-          dummy << $".pop while $".length > COLON_BEFORE_EXECUTOR_LEN
-          dummy.each do |path|
-            expanded_path = File.expand_path(path)
-            $".push path unless expanded_path[0..BUILDER_ROOT.length-1] == BUILDER_ROOT && File.exists?(expanded_path)
-          end
-          require 'executor'
-          
           executor = Executor.new(config.builder_name)
       
           until other_lines.empty?
