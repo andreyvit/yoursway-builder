@@ -20,6 +20,10 @@ BUILDER_ROOT = File.expand_path(File.dirname(__FILE__))
 Dir.chdir BUILDER_ROOT
 $:.unshift BUILDER_ROOT
 
+def Kernel.is_windows?
+  RUBY_PLATFORM =~ /(mswin|cygwin|mingw)(32|64)/
+end
+
 class Reloader
   
   def initialize

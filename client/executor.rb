@@ -94,7 +94,11 @@ class Executor
     @stores = {}
     @items = {}
     @aliases = {}
-    @storage_dir = '/tmp/storage'
+    if File.directory? "/tmp" and not is_windows?
+      @storage_dir = "/tmp/ysbuilder-#{builder_name}" 
+    else
+      @storage_dir = File.join(File.tmpdir, "ysbuilder-#{builder_name}")
+    end
     load_alternates_file
   end
   
