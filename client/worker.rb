@@ -138,7 +138,7 @@ class ServerCommunication
   
   attr_writer :retry_interval
   
-  def initialize server_host, builder_name, retry_interval
+  def initialize feedback, server_host, builder_name, retry_interval
     @builder_name = builder_name
     @server_host = server_host
     @obtain_work_uri = URI.parse("http://#{@server_host}/builders/#{@builder_name}/obtain-work")
@@ -205,20 +205,136 @@ private
   
 end
 
-comm = ServerCommunication.new(config.server_host, config.builder_name, config.poll_interval)
-
-def log message
-  puts message
+class ConsoleFeedback
+  
+  def start_job id
+    puts "Starting job #{id}"
+  end
+  
+  def start_command command, complexity
+    raise "Invalid complexity #{complexity}" unless [:short, :long].include?(complexity)
+    puts "Starting command #{command}"
+  end
+  
+  def finished_command
+    puts "Finished command."
+  end
+  
+  def job_done id, options
+    outcome = options[:outcome]
+    if outcome == 'SUCCESS'
+      puts "Successfully finished job #{id}"
+    else
+      puts "FAILURE REASON (message id #{message_id})\n"
+      puts "#{failure_reason}"
+      puts "END FAILURE REASON (message id #{message_id})"
+    end
+  end
+  
+  def command_output output
+    puts output
+  end
+  
+  def error message
+    puts message
+  end
+  
+  def info message
+    puts message
+  end
+  
 end
 
+class NetworkFeedback
+  
+  def initialize communicator
+    @communicator = communicator
+  end
+  
+  def start_job id
+    @job_id = id
+  end
+  
+  def start_command command, complexity
+  end
+  
+  def finished_command
+  end
+  
+  def job_done id, options
+    @comm.job_done id, options
+  end
+  
+  def command_output output
+  end
+  
+  def error message
+  end
+  
+  def info message
+  end
+  
+end
+
+class Multicast
+  
+  def initialize *targets
+    @targets = targets
+  end
+  
+  def method_missing id, *args
+    @targets.each { |t| t.send(id, *args) }
+  end
+  
+end
+
+feedback = ConsoleFeedback.new
+comm = ServerCommunication.new(feedback, config.server_host, config.builder_name, config.poll_interval)
+
 class ExecutionError < Exception
+end
+
+def process_job feedback, builder_name, message_id
+  feedback.start_job message_id
+  report = nil
+  outcome = "SUCCESS"
+  begin
+    executor = Executor.new(builder_name, feedback)
+
+    until other_lines.empty?
+      line = other_lines.shift.chomp
+      next if line.strip.empty?
+      next if line =~ /^\s*#/
+  
+      command, *args = line.split("\t")
+      data = []
+      until other_lines.empty?
+        line = other_lines.shift.chomp
+        next if line.strip.empty?
+        next if line =~ /^\s*#/
+        if line[0..0] == "\t"
+          data << line[1..-1].split("\t")
+        else
+          other_lines.unshift line
+          break
+        end
+      end
+  
+      executor.execute command, args, data
+    end
+  
+    report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
+  rescue Exception
+    outcome = "ERR"
+    failure_reason = "#{$!.class.name}: #{$!.message}\n#{($!.backtrace || []).join("\n")}"
+  end
+  feedback.job_done message_id, :report => report, :outcome => outcome, :failure_reason => failure_reason
 end
 
 while not interrupted
   $reloader.check_and_maybe_quit!
   
   response_body = comm.obtain_work
-  wait_before_polling = true
   unless response_body.nil?
     first_line, *other_lines = response_body.split("\n")
 
@@ -227,68 +343,35 @@ while not interrupted
     
     command, *args = first_line.chomp.split("\t")
     command.upcase!
-    if ['IDLE', 'ENVELOPE', 'SELFUPDATE'].include?(command)
-      proto_ver = args[0]
-      if proto_ver == 'v1'
-        if command == 'IDLE'
-          new_interval = [60*20, args[1].to_i].min
-          if !config.poll_interval_overriden && new_interval >= 10 && config.poll_interval != new_interval
-            config.poll_interval = new_interval
-            comm.retry_interval  = new_interval
-            log "Poll interval set to #{config.poll_interval}"
-          end
-          other_lines = []  # never execute
-        elsif command == 'SELFUPDATE'
-          exit!(55)
-        else
-          message_id = args[1]
-          wait_before_polling = false
-        end
-      end
-      
-      if message_id
-        report = nil
-        outcome = "SUCCESS"
-        begin
-          executor = Executor.new(config.builder_name)
-      
-          until other_lines.empty?
-            line = other_lines.shift.chomp
-            next if line.strip.empty?
-            next if line =~ /^\s*#/
-        
-            command, *args = line.split("\t")
-            data = []
-            until other_lines.empty?
-              line = other_lines.shift.chomp
-              next if line.strip.empty?
-              next if line =~ /^\s*#/
-              if line[0..0] == "\t"
-                data << line[1..-1].split("\t")
-              else
-                other_lines.unshift line
-                break
-              end
-            end
-        
-            executor.execute command, args, data
-          end
-        
-          report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
-        rescue Exception
-          outcome = "ERR"
-          failure_reason = "#{$!.class.name}: #{$!.message}\n#{($!.backtrace || []).join("\n")}"
-          puts "FAILURE REASON (message id #{message_id})\n"
-          puts "#{failure_reason}"
-          puts "END FAILURE REASON (message id #{message_id})"
-        end
-        comm.job_done message_id, 'report' => report, 'outcome' => outcome, 'failure_reason' => failure_reason
-      end
+    unless ['IDLE', 'ENVELOPE', 'SELFUPDATE'].include?(command)
+      feedback.error "Unknown command received (#{command}), initiating self-update in #{config.poll_interval} seconds."
+      sleep config.poll_interval
+      exit! 55
     end
-  end
-  
-  if wait_before_polling
-    log "Sleeping for #{config.poll_interval} seconds."
-    sleep config.poll_interval
+      
+    proto_ver = args[0]
+    unless proto_ver == 'v1'
+      feedback.error "Unsupported protocol version detected (#{proto_ver}), initiating self-update in #{config.poll_interval} seconds."
+      sleep config.poll_interval
+      exit! 55
+    end
+    
+    case command
+    when 'IDLE'
+      new_interval = [60*20, args[1].to_i].min
+      if !config.poll_interval_overriden && new_interval >= 10 && config.poll_interval != new_interval
+        config.poll_interval = new_interval
+        comm.retry_interval  = new_interval
+        feedback.info "Poll interval set to #{config.poll_interval}"
+      end
+      
+      feedback.info "No outstanding jobs, gonna be lazing for #{config.poll_interval} seconds."
+      sleep config.poll_interval
+    when 'SELFUPDATE'
+      exit!(55)
+    else
+      message_id = args[1]
+      process_job Multicast.new(feedback, NetworkFeedback.new(comm)), config.builder_name, message_id
+    end
   end
 end
