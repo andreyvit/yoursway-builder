@@ -746,6 +746,9 @@ class BuilderMessageDoneHandler(BaseHandler):
     else:
       build.state = BUILD_ABANDONED
     build.put()
+    
+    key = "progress-%s" % (message_key)
+    memcache.set(key, "FIN", time = 60*60)
 
 class ReportProgressHandler(BaseHandler):
   def post(self, message_key):
@@ -759,7 +762,12 @@ class MessageConsoleHandler(BaseHandler):
   def post(self, message_key):
     key = "progress-%s" % (message_key)
     value = memcache.get(key)
-    self.response.out.write("<pre>%s</pre>" % value)
+    if value is None:
+      self.response.out.write("Waiting for log from the builder...")
+    elif value == "FIN":
+      self.response.out.write("<script>reload_page()</script>Reloading page...")
+    else:
+      self.response.out.write("%s" % value)
 
 class ServerConfigHandler(BaseHandler):
   @prolog(config_needed = False, required_level = ADMIN_LEVEL)

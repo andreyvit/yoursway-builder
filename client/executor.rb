@@ -147,6 +147,8 @@ class Executor
       do_subst_vars data_lines, *args
     when 'NSIS-FILE-LIST'
       do_nsis_file_list *args
+    when 'SLEEP'
+      do_sleep *args
     else
       raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})"
     end
@@ -528,6 +530,14 @@ private
         rel_dir = dir.drop_prefix_or_fail(common_prefix).gsub('/', '\\').gsub('$', '$$')
         uninstf.puts %Q!RmDir "$INSTDIR\\#{rel_dir}"!
       end
+    end
+  end
+  
+  def do_sleep delay
+    delay = delay.to_i
+    while delay > 0
+      sleep 1
+      delay -= 1
     end
   end
   
