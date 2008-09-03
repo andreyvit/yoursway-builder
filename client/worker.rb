@@ -20,7 +20,7 @@ BUILDER_ROOT = File.expand_path(File.dirname(__FILE__))
 Dir.chdir BUILDER_ROOT
 $:.unshift BUILDER_ROOT
 
-def Kernel.is_windows?
+def is_windows?
   RUBY_PLATFORM =~ /(mswin|cygwin|mingw)(32|64)/
 end
 
@@ -45,12 +45,21 @@ class Reloader
     end
   end
   
+  def find_module_to_reload
+    @recorded_modules.find { |file, mtime| File.mtime(file) != mtime }
+  end
+  
   def reload_needed?
-    @recorded_modules.any? { |file, mtime| File.mtime(file) != mtime }
+    !!find_module_to_reload
   end
   
   def check_and_maybe_quit!
-    exit! 22 if reload_needed?
+    if changes = find_module_to_reload
+      file, mtime = changes
+      puts "Restarting this builder because '#{file[BUILDER_ROOT.length+1..-1]}' has been changed on disk."
+      puts
+      exit! 22
+    end
   end
   
 end
@@ -105,18 +114,98 @@ OptionParser.new do |opts|
   end
 end.parse!
 
+puts
+puts "=============================================================================="
 puts "YourSway Builder build host"
 puts
 puts "Please verify that the following is correct. Push Ctrl-C to stop this builder."
 puts
-puts "Server:        #{config.server_host}"
-puts "Builder name:  #{config.builder_name}"
+puts "Server:              #{config.server_host}"
+puts "Builder name:        #{config.builder_name}"
+if config.poll_interval_overriden
+puts "Fixed poll interval: #{config.poll_interval} seconds"
+end
+puts "=============================================================================="
 puts
 
 interrupted = false
 # trap("INT") { interrupted = true }
 
-obtain_work_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/obtain-work")
+class NetworkError < StandardError
+end
+
+class ServerCommunication
+  
+  attr_writer :retry_interval
+  
+  def initialize server_host, builder_name, retry_interval
+    @builder_name = builder_name
+    @server_host = server_host
+    @obtain_work_uri = URI.parse("http://#{@server_host}/builders/#{@builder_name}/obtain-work")
+    @retry_interval = retry_interval
+  end
+  
+  def obtain_work
+    post "Asking #{@server_host} to provide new jobs...",
+      @obtain_work_uri, 'token' => 42
+  end
+  
+  def job_done message_id, data
+    post "Reporting job results to #{@server_host}...",
+      message_done_uri(message_id), data.merge('token' => 42)
+  end
+  
+private
+
+  def message_done_uri(message_id)
+    URI.parse("http://#{@server_host}/builders/#{@builder_name}/messages/%s/done" % message_id)
+  end
+
+  def post(message, uri, vars = {})
+    network_operation(message) do
+      Net::HTTP.post_form(uri, vars)
+    end
+  end
+
+  def network_operation message, &block
+    begin
+      puts message
+      return try_network_operation(&block)
+    rescue NetworkError => e
+      puts e.message
+      puts "Will retry in #{@retry_interval} seconds."
+      sleep @retry_interval
+      retry
+    end
+  end
+
+  def try_network_operation
+    begin
+      response = yield
+      return response.body if (200...300) === response.code.to_i
+      raise NetworkError, "Server returned error response #{response.code}"
+    rescue Errno::ECONNREFUSED => e
+      raise NetworkError, "Connection refused: #{e}" 
+    rescue Errno::EPIPE => e
+      raise NetworkError, "Broken pipe: #{e}" 
+    rescue Errno::ECONNRESET => e
+      raise NetworkError, "Connection reset: #{e}" 
+    rescue Errno::ECONNABORTED => e
+      raise NetworkError, "Connection aborted: #{e}" 
+    rescue Errno::ETIMEDOUT => e
+      raise NetworkError, "Connection timed out: #{e}"
+    rescue Timeout::Error => e
+      raise NetworkError, "Connection timed out: #{e}" 
+    rescue SocketError => e
+      raise NetworkError, "Socket error: #{e}" 
+    rescue EOFError => e
+      raise NetworkError, "EOF error: #{e}"
+    end
+  end
+  
+end
+
+comm = ServerCommunication.new(config.server_host, config.builder_name, config.poll_interval)
 
 def log message
   puts message
@@ -125,42 +214,13 @@ end
 class ExecutionError < Exception
 end
 
-def try_network_operation
-  begin
-    return yield
-  rescue Errno::ECONNREFUSED => e
-    $stderr.puts "Connection refused: #{e}" 
-  rescue Errno::EPIPE => e
-    $stderr.puts "Broken pipe: #{e}" 
-  rescue Errno::ECONNRESET => e
-    $stderr.puts "Connection reset: #{e}" 
-  rescue Errno::ECONNABORTED => e
-    $stderr.puts "Connection aborted: #{e}" 
-  rescue Errno::ETIMEDOUT => e
-    $stderr.puts "Connection timed out: #{e}"
-  rescue Timeout::Error => e
-    $stderr.puts "Connection timed out: #{e}" 
-  rescue SocketError => e
-    $stderr.puts "Socket error: #{e}" 
-  rescue EOFError => e
-    $stderr.puts "EOF error: #{e}"
-  end
-  return nil
-end
-
 while not interrupted
   $reloader.check_and_maybe_quit!
   
-  res = try_network_operation do
-    Net::HTTP.post_form(obtain_work_uri, {'token' => 42})
-  end
+  response_body = comm.obtain_work
   wait_before_polling = true
-  if res.nil?
-    #
-  elsif res.code.to_i != 200
-    log "Error response: code #{res.code}"
-  else
-    first_line, *other_lines = res.body.split("\n")
+  unless response_body.nil?
+    first_line, *other_lines = response_body.split("\n")
 
     result = []
     message_id = nil
@@ -174,6 +234,7 @@ while not interrupted
           new_interval = [60*20, args[1].to_i].min
           if !config.poll_interval_overriden && new_interval >= 10 && config.poll_interval != new_interval
             config.poll_interval = new_interval
+            comm.retry_interval  = new_interval
             log "Poll interval set to #{config.poll_interval}"
           end
           other_lines = []  # never execute
@@ -221,28 +282,13 @@ while not interrupted
           puts "#{failure_reason}"
           puts "END FAILURE REASON (message id #{message_id})"
         end
-        message_done_uri = URI.parse("http://#{config.server_host}/builders/#{config.builder_name}/messages/%s/done" % message_id)
-        loop do
-          res = try_network_operation do
-            Net::HTTP.post_form(message_done_uri, {'token' => 42, 'report' => report, 'outcome' => outcome,
-              'failure_reason' => failure_reason})
-          end
-          if res.nil?
-            log "Could not post results, will repeat..."
-          elsif res.code.to_i != 200
-            log "Error posting results: code #{res.code}"
-          else
-            break
-          end
-          log "Will retry posting resuts in #{config.poll_interval} seconds"
-          sleep config.poll_interval
-        end
+        comm.job_done message_id, 'report' => report, 'outcome' => outcome, 'failure_reason' => failure_reason
       end
     end
   end
   
   if wait_before_polling
-    log "Sleeping for #{config.poll_interval} seconds"
+    log "Sleeping for #{config.poll_interval} seconds."
     sleep config.poll_interval
   end
 end
