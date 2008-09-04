@@ -254,6 +254,10 @@ class Executor
     @aliases[name] = resolve_alias(item_name)
   end
   
+  def resolve_variable name
+    @variables[name] or raise ExecutionError.new("Undefined variable [#{name}]")
+  end
+  
 private
 
   def load_alternates_file
@@ -280,15 +284,6 @@ private
     return item.fetch_locally(@feedback) if item.is_fetching_very_fast?
     @feedback.action "Fetching item #{item.name}..."
     item.fetch_locally @feedback
-  end
-  
-  def parse_tags tags_str
-    tags_str = (tags_str || '').strip
-    return case tags_str when '', '-' then [] else tags_str.split(/\s*,\s*/) end
-  end
-  
-  def resolve_variable name, additional_variables
-    @variables[name] or raise ExecutionError.new("Undefined variable [#{ref}]")
   end
   
   def resolve_ref ref
@@ -450,7 +445,7 @@ module InvokeCommands
     end
     @args = args
     execute_subcommands!
-    invoke! app, @args
+    invoke! app, *@args
   end
   
   def do_arg! arg
@@ -636,7 +631,7 @@ class SyncCommand < Command
   def do_execute! first, second
     @mappings = []
     execute_subcommands!
-    YourSway::Sync.synchronize parse_sync_party(first), parse_sync_party(second), mappings
+    YourSway::Sync.synchronize parse_sync_party(first), parse_sync_party(second), @mappings
   end
   
   def do_map! first_prefix, first_actions, second_prefix, second_actions
@@ -663,14 +658,14 @@ private
   def parse_sync_party party_name
     party_name = @executor.resolve_alias(party_name)
     if item = @executor.items[party_name]
-       [item.create_sync_party].each { |party| return party unless party.nil? }
+       [item.create_sync_party(@feedback)].each { |party| return party unless party.nil? }
     end
     if store = @executor.stores[party_name]
-      [store.create_sync_party].each { |party| return party unless party.nil? }
+      [store.create_sync_party(@feedback)].each { |party| return party unless party.nil? }
     end
-    return YourSway::Sync::LocalParty.new(party_name) if File.directory? party_name
+    return YourSway::Sync::LocalParty.new(party_name, @feedback) if File.directory? party_name
     expanded_path = File.expand_path(party_name)
-    return YourSway::Sync::LocalParty.new(expanded_path) if File.directory? expanded_path
+    return YourSway::Sync::LocalParty.new(expanded_path, @feedback) if File.directory? expanded_path
     raise BuildScriptError, "SYNC: unrecognized party spec '#{party_name}'"
   end
 
@@ -787,7 +782,7 @@ class FixPlistCommand < Command
     File.open(file, 'w') { |f| f.write(lines.join("\n")) }
   end
   
-  def do_fix! lines
+  def do_fix! lines, header, value
     lines.each { |$_| gsub!(/<string>([^<]+)<\/string>/) { "<string>#{value}</string>" } if ($_ =~ /<key>#{header}<\/key>/) ... (/<key>/) }
   end
   
@@ -799,7 +794,7 @@ class SubstVarsCommand < Command
     @additional_variables = {}
     execute_subcommands!
     data = File.read(file)
-    data = subst_variables(data, @additional_variables)
+    data = subst_variables(data)
     File.open(file, 'w') { |f| f.write data}
   end
   
@@ -810,7 +805,7 @@ class SubstVarsCommand < Command
 private
   
   def subst_variables text
-    collect_refs_in(text).uniq.each { |var| @additional_variables[var] ||= @executor.resolve_variable(var) }
+     collect_refs_in(text).uniq.each { |ref| @additional_variables[ref.name] ||= @executor.resolve_variable(ref.name) }
     subst_refs_in(text, @additional_variables)
   end
   

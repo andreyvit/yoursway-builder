@@ -288,6 +288,8 @@ class NetworkFeedback
   
   def start_job id
     @job_id = id
+    @log_lines.push "", "Build started at #{Time.now.strftime("%c")} (message id #{id})."
+    check_flush!
   end
   
   def add_lines! *lines
@@ -300,9 +302,11 @@ class NetworkFeedback
   def check_flush!
     @log_lines = @log_lines[-20..-1] if @log_lines.length > 20
     now = Time.new
-    if @job_id && (@last_time.nil? or (now - @last_time >= @feedback_interval))
-      @communicator.send_console @job_id, @log_lines.join("\n")
-      @last_time = now
+    if @job_id
+      if @last_time.nil? || (now - @last_time >= @feedback_interval)
+        @communicator.send_console @job_id, @log_lines.join("\n")
+        @last_time = now
+      end
     end
   end
   

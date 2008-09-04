@@ -770,6 +770,13 @@ class ReportProgressHandler(BaseHandler):
     key = "progress-%s" % (message_key)
     memcache.set(key, console, time = 60*60)
     
+    # bs = memcache.get("message-builderstate-%s" % message_key)
+    # if bs is None:
+    #   
+    # self.builder.last_check_at = datetime.now()
+    # self.builder.put()
+  
+    
   get = post
 
 class MessageConsoleHandler(BaseHandler):

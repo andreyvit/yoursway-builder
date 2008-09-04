@@ -10,39 +10,45 @@ module YourSway::Sync
   
   class LocalParty
   
-    def initialize dir
+    def initialize dir, feedback
       @dir = dir
+      @feedback = feedback
     end
     
     def connect
-      yield LocalConnection.new(@dir)
+      yield LocalConnection.new(@dir, @feedback)
     end
     
   end
   
   class LocalConnection
     
-    def initialize dir
+    def initialize dir, feedback
       @dir = dir
+      @feedback = feedback
     end
     
     def list_files
+      @feedback.info "Obtaining local directory listing..."
       list_entries_recursively(@dir, '')
     end
     
     def add! rel_path, file
+      @feedback.info "Adding #{rel_path} locally..."
       path = File.join(@dir, rel_path)
       raise "#{rel_path} already exists" if File.exist? path
       write_file! path, file
     end
     
     def remove! file
+      @feedback.info "Deleting #{file.rel_path} locally..."
       path = File.join(@dir, file.rel_path)
       raise "#{rel_path} does not exists" unless File.exist? path
       File.unlink path
     end
     
     def replace! old_file, file
+      @feedback.info "Replacing #{old_file.rel_path} locally..."
       path = File.join(@dir, old_file.rel_path)
       raise "#{rel_path} does not exists" unless File.exist? path
       write_file! path, file
@@ -125,15 +131,16 @@ module YourSway::Sync
   
   class S3Party
     
-    def initialize(amazon, bucket, key_prefix)
+    def initialize(amazon, bucket, key_prefix, feedback)
       @amazon = amazon
       @bucket = bucket
       @key_prefix = key_prefix
+      @feedback = feedback
     end
     
     def connect
       @amazon.connect(@bucket, @key_prefix) do |c|
-        yield S3Connection.new(c)
+        yield S3Connection.new(c, @feedback)
       end
     end
     
@@ -147,24 +154,29 @@ module YourSway::Sync
   
   class S3Connection
     
-    def initialize connection
+    def initialize connection, feedback
       @connection = connection
+      @feedback = feedback
     end
     
     def list_files
+      @feedback.info "Obtaining item list of S3 bucket..."
       @connection.list.collect { |f| S3File.new(@connection, f, f.key) }
     end
     
     def add! rel_path, file
+      @feedback.info "Uploading #{rel_path} to S3..."
       local_path = file.to_local_file
       @connection.put_file rel_path, local_path
     end
     
     def replace! old_file, file
+      @feedback.info "Replacing #{old_file.rel_path} on S3..."
       add! old_file.rel_path, file
     end
     
     def remove! file
+      @feedback.info "Deleting #{file.rel_path} on S3..."
       @connection.delete file.rel_path
     end
     
