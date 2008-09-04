@@ -14,18 +14,37 @@
 
 {% if at_least_normal %}
   <h2>New build?</h2>
-  <form action="/projects/{{ project.urlname }}/build" method="post">
-  <p><label for="version">Version: </label><input type="text" id="version" name="version" value="{{ next_version }}"></p>
-  <p><label for="builder">Builder: </label>
-  	<select type="text" id="builder" name="builder" value="">
-  		{% for builder in builders %}
-  		<option value="{{ builder.name }}" {% ifequal last_used_builder.key builder.key %}selected="selected"{% endifequal %}>{{ builder.name }}</option>
-  		{% endfor %}
-  	</select>
-  </p>
+	<blockquote style="border-left: 15px solid black; margin-left: 0px; padding-left: 20px;">
+	  <form action="/projects/{{ project.urlname }}/build" method="post">
+	  <p><label for="version">Version: </label><input type="text" id="version" name="version" value="{{ next_version }}"></p>
+	  <p><label for="builder">Builder: </label>
+	  	<select type="text" id="builder" name="builder" value="">
+	  		{% for builder in builders %}
+	  		<option value="{{ builder.name }}" {% ifequal last_used_builder.key builder.key %}selected="selected"{% endifequal %}>{{ builder.name }}</option>
+	  		{% endfor %}
+	  	</select>
+	  </p>
 
-  <p><input type="submit" value="Start building"></p>
-  </form>
+		{% if project.script_info.alternable_repositories %}
+			<p>
+			<table>
+			<caption>Choose the repositories to use:</caption>
+			{% for repos in project.script_info.alternable_repositories %}
+			<tr>
+				<td>{{ repos.descr }}</td>
+				<td><select name="location_{{ repos.name }}">
+					{% for location in repos.locations %}
+						<option value="{{ location.name }}">{{ location.name }}</option>
+					{% endfor %}
+				</select></td>
+			</tr>
+			{% endfor %}
+			</table>
+		{% endif %}
+
+	  <p><input type="submit" value="Start building"></p>
+	  </form>
+	</blockquote>
 
   {% if online_builders %}
   	<h2>Builders</h2>

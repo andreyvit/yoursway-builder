@@ -139,6 +139,7 @@ class Executor
     @stores = {}
     @items = {}
     @aliases = {}
+    @preferred_locations = {}
     if File.directory? "/tmp" and not is_windows?
       @storage_dir = "/tmp/ysbuilder-#{builder_name}" 
     else
@@ -195,6 +196,7 @@ class Executor
   
   def define_repository name
     @repositories[name] ||= yield
+    @repositories[name].set_preferred_location! @preferred_locations[name] if @preferred_locations[name]
   end
   
   def redefine_repository! name, repos
@@ -256,6 +258,11 @@ class Executor
   
   def resolve_variable name
     @variables[name] or raise ExecutionError.new("Undefined variable [#{name}]")
+  end
+  
+  def set_preferred_location repo_name, reason, location_name
+    @preferred_locations[repo_name] = location_name
+    @repositories[repo_name].set_preferred_location! location_name if @repositories[repo_name]
   end
   
 private
@@ -479,20 +486,22 @@ class InvokeRubyCommand < Command
   
 end
 
-class GitReposCommand < Command
+class ReposCommand < Command
   
   acts_as_short
   
-  def do_execute! name
-    @repos = @executor.define_repository(name) { GitRepository.new(@executor.project_dir, name) }
+  def do_execute! name, tags, description
+    tags = parse_tags(tags)
+    @repos = @executor.define_repository(name) { Repository.new(@executor.project_dir, name, tags, description) }
     execute_subcommands!
     if override = @executor.override_for(@repos)
       @executor.redefine_repository! name, LocalPseudoRepository.new(override.local_dir, @repos.name)
     end
   end
   
-  def do_git! *args
-    @repos.add_location GitLocation.new(*args)
+  def do_git! name, tags, url
+    tags = parse_tags(tags)
+    @repos.add_location GitLocation.new(name, tags, url)
   end
   
 end
@@ -864,3 +873,12 @@ class NopCommand < Command
   end
   
 end
+
+class ChooseCommand < Command
+  
+  def do_execute! repo_name, reason, location_name
+    @executor.set_preferred_location repo_name, reason, location_name
+  end
+  
+end
+

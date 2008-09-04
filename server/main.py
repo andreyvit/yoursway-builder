@@ -19,11 +19,10 @@ from yslib.dates import time_delta_in_words, delta_to_seconds
 from random import choice
 from sets import Set
 
-def create_token(len = 10):
-  result = ''
-  for i in xrange(len):
-    result += choice('abcdefghijklmnoprstuvwxyz0123456789')
-  return result
+from tabular import tabularize, untabularize
+from builder.data.perproject import script_info
+from builder.utils import create_token
+from builder.data.chosen_repos import repo_configuration_info
   
 def calculate_next_version(latest_build):
   if latest_build is None:
@@ -93,6 +92,7 @@ class Project(db.Model):
   created_at = db.DateTimeProperty(auto_now_add=True)
   is_public = db.BooleanProperty(default = False)
   script = db.TextProperty(default = '')
+  script_info_tab = db.TextProperty(default = '')
   continuous_builder = db.ReferenceProperty(Builder, collection_name = 'continuously_built_projects')
   continuous_token = db.StringProperty()
   
@@ -110,7 +110,17 @@ class Project(db.Model):
     
   @staticmethod
   def by_urlname(permalink):
-    return Project.all().filter('permalink =', permalink).get()    
+    return Project.all().filter('permalink =', permalink).get()
+    
+  def script_info(self):
+    if not hasattr(self, '_script_info'):
+      self._script_info = untabularize(script_info(),self.script_info_tab)
+    return self._script_info
+    
+  def derive_info_from_script(self, common_script):
+    self._script_info = untabularize(script_info(), common_script + "\n" + self.script)
+    self._script_info.postprocess()
+    self.script_info_tab = db.Text(tabularize(self._script_info))
     
 def split_tags(s):
   if s == '-':
@@ -136,6 +146,7 @@ class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   builder = db.ReferenceProperty(Builder, collection_name = 'builds')
   state = db.IntegerProperty(default = BUILD_ABANDONED, choices = [BUILD_INPROGRESS, BUILD_QUEUED, BUILD_SUCCEEDED, BUILD_FAILED, BUILD_ABANDONED])
+  repo_configuration = db.TextProperty(default = '')
   version = db.StringProperty()
   report = db.TextProperty(default = '')
   failure_reason = db.TextProperty(default = '')
@@ -450,13 +461,15 @@ class BaseHandler(webapp.RequestHandler):
         self.not_found("No user account exists for email address “%s”" % person_component)
     self.data.update(person = self.person)
     
-  def start_build(self, version, builder):
+  def start_build(self, version, builder, repo_configuration):
+    repo_configuration = tabularize(repo_configuration)
+    
     build = Build(project = self.project, version = version, builder = builder, created_by = self.user,
-      state = BUILD_QUEUED)
+      repo_configuration = repo_configuration, state = BUILD_QUEUED)
     build.put()
 
-    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s\n%s" % (version, self.project.permalink, self.project.name,
-      self.config.common_script, self.project.script)
+    body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s\n%s\n%s" % (version, self.project.permalink, self.project.name,
+      self.config.common_script, repo_configuration, self.project.script)
 
     message = Message(builder = builder, build = build, body = body)
     message.put()
@@ -489,6 +502,7 @@ class CreateEditProjectHandler(BaseHandler):
 
     errors = self.project.validate()
     if len(errors) == 0:
+      self.project.derive_info_from_script(self.config.common_script)
       self.project.put()
       self.redirect('/projects/%s' % self.project.urlname())
     else:       
@@ -629,8 +643,25 @@ class BuildProjectHandler(BaseHandler):
       logging.info("Ignoring build request with the same version number (%s, project %s)" % (version, self.project.name))
       self.redirect_and_finish('/projects/%s' % self.project.urlname(),
         flash = "Version %s already exists. Please pick another." % version)
-      
-    self.start_build(version, self.builder)
+
+    script_info = self.project.script_info()
+    repo_configuration = repo_configuration_info()
+    for repos in script_info.alternable_repositories:
+      chosen_location_name = (self.request.get("location_%s" % repos.permalink) or '')
+      if chosen_location_name == '':
+        self.redirect_and_finish('/projects/%s' % self.project.urlname(),
+          flash = "Sorry, please also choose a repository for %s." % (repos.name))
+      default_location = repos.locations[0]
+      if chosen_location_name == default_location.name:
+        repo_configuration.set(repos.name, 'default', default_location.name)
+      elif chosen_location_name in map(lambda l: l.name, repos.locations):
+        repo_configuration.set(repos.name, 'manual', chosen_location_name)
+      else:
+        raise str("Sorry, location %s is no longer available for repository %s." % (chosen_location_name, repos.name))
+        self.redirect_and_finish('/projects/%s' % self.project.urlname(),
+          flash = "Sorry, location %s is no longer available for repository %s." % (chosen_location_name, repos.name))
+
+    self.start_build(version, self.builder, repo_configuration)
     
     if self.account:
       self.account.last_used_builder = self.builder
@@ -661,8 +692,13 @@ class StartContinuousBuildProjectHandler(BaseHandler):
       logging.info("Ignoring build request with the same version number (%s, project %s)" % (version, self.project.name))
       self.error(400)
       return
+      
+    script_info = self.project.script_info()
+    repo_configuration = repo_configuration_info()
+    for repos in script_info.alternable_repositories:
+      repo_configuration.set(repos.name, 'default', repos.locations[0].name)
 
-    self.start_build(version, builder)
+    self.start_build(version, builder, repo_configuration)
 
     self.response.out.write("OK\t%s" % version)
     
