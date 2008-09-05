@@ -16,7 +16,7 @@ a.nav, a.nav:visited { color: blue; }
 	<body>
     
     {% if username %}
-      <p>You are signed in as {{ username }} ({{ account.level_name }}) — <a class="nav" href="{{ logout_url }}">sign out</a>.</p>
+      <p>You are signed in as {{ username }} ({{ profile.level_name }}) — <a class="nav" href="{{ logout_url }}">sign out</a>.</p>
     {% else %}
       <p>You are not signed in — <a class="nav" href="{{ login_url }}">sign in</a>.</p>
     {% endif %}

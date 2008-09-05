@@ -53,9 +53,9 @@ class BuildProjectHandler(BaseHandler):
 
     self.start_build(version, self.builder, repo_configuration)
     
-    if self.account:
-      self.account.last_used_builder = self.builder
-      self.account.put()
+    if self.profile:
+      self.profile.last_used_builder = self.builder
+      self.profile.put()
     
     self.redirect_and_finish('/projects/%s' % self.project.urlname(),
       flash = "Started bulding version %s. Please refresh this page to track status." % version)

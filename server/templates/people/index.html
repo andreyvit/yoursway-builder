@@ -11,10 +11,10 @@
     <th>E-mail</th>
     <th>Permissions</th>
   </tr>
-  {% for person in people %}
+  {% for profile in profiles %}
     <tr>
-      <td><a href="/people/{{ person.email }}">{{ person.email }}</a></td>
-      <td>{{ person.level_name }}</td>
+      <td><a href="/people/{{ profile.email }}">{{ profile.email }}</a></td>
+      <td>{{ profile.level_name }}</td>
     </tr>
   {% endfor %}
   <tr>

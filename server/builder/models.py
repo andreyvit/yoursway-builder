@@ -243,7 +243,7 @@ class Message(db.Model):
     key = "progress-%s" % (self.key())
     memcache.set(key, "FIN", time = 60*60)
 
-class Account(db.Model):
+class Profile(db.Model):
   user = db.UserProperty()
   email = db.EmailProperty()
   level = db.IntegerProperty(default = NORMAL_LEVEL, choices = [ANONYMOUS_LEVEL, VIEWER_LEVEL, NORMAL_LEVEL, ADMIN_LEVEL, GOD_LEVEL])

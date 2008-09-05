@@ -34,7 +34,7 @@ class prolog(object):
         self.read_flash()
         self.read_config(config_needed = decor.config_needed)
         self.read_user()
-        self.effective_level = self.account.level
+        self.effective_level = self.profile.level
         for func, arg in zip(decor.path_components, args):
           getattr(self, 'fetch_%s' % func)(arg)
         if self.effective_level < decor.required_level:
@@ -87,28 +87,28 @@ class BaseHandler(webapp.RequestHandler):
   def read_user(self):
     self.user = users.get_current_user()
     if self.user == None:
-      self.account = Account(user = None, email = None, level = ANONYMOUS_LEVEL)
+      self.profile = Profile(user = None, email = None, level = ANONYMOUS_LEVEL)
       self.data.update(username = None, login_url = users.create_login_url(self.request.uri))
     else:
-      self.account = (Account.all().filter('user =', self.user).get() or
-        Account.all().filter('email =', self.user.email()).get() or
-        Account(user = self.user, email = self.user.email(), level = ANONYMOUS_LEVEL))
-      if users.is_current_user_admin() and self.account.level < GOD_LEVEL:
+      self.profile = (Profile.all().filter('user =', self.user).get() or
+        Profile.all().filter('email =', self.user.email()).get() or
+        Profile(user = self.user, email = self.user.email(), level = ANONYMOUS_LEVEL))
+      if users.is_current_user_admin() and self.profile.level < GOD_LEVEL:
         # propagate new admins to gods
-        self.account.level = GOD_LEVEL
-        self.account.put()
-      elif not users.is_current_user_admin() and self.account.level == GOD_LEVEL:
+        self.profile.level = GOD_LEVEL
+        self.profile.put()
+      elif not users.is_current_user_admin() and self.profile.level == GOD_LEVEL:
         # revoke god priveledges from ex-admins
-        self.account.level = ADMIN_LEVEL
-        self.account.put()
-      if self.account.email == None:
-        self.account.email = self.user.email()
-        self.account.put()
-      if self.account.user == None:
-        self.account.user = self.user
-        self.account.put()
+        self.profile.level = ADMIN_LEVEL
+        self.profile.put()
+      if self.profile.email == None:
+        self.profile.email = self.user.email()
+        self.profile.put()
+      if self.profile.user == None:
+        self.profile.user = self.user
+        self.profile.put()
       self.data.update(username = self.user.nickname(), logout_url = users.create_logout_url(self.request.uri))
-    self.data.update(account = self.account)
+    self.data.update(profile = self.profile)
     
   def elaborate_permissions_for_template(self):
     self.data.update(
@@ -190,19 +190,19 @@ class BaseHandler(webapp.RequestHandler):
       self.not_found("Builder ‘%s’ not found" % self.request.get('builder'))
     self.data.update(builder = self.builder)
     
-  def also_fetch_people(self):
-    self.people = Account.all().fetch(1000)
-    self.data.update(people = self.people)
+  def also_fetch_profiles(self):
+    self.profiles = Profile.all().fetch(1000)
+    self.data.update(profiles = self.profiles)
     
-  def fetch_person(self, person_component):
-    person_component = person_component.replace('%40', '@')
-    if person_component == 'new' or person_component == 'invite':
-      self.person = Account(level = ANONYMOUS_LEVEL)
+  def fetch_profile(self, profile_component):
+    profile_component = profile_component.replace('%40', '@')
+    if profile_component == 'new' or profile_component == 'invite':
+      self.profile = Profile(level = ANONYMOUS_LEVEL)
     else:
-      self.person = Account.all().filter('email =', person_component).get()
-      if self.person == None:
-        self.not_found("No user account exists for email address “%s”" % person_component)
-    self.data.update(person = self.person)
+      self.profile = Profile.all().filter('email =', profile_component).get()
+      if self.profile == None:
+        self.not_found("No registered user exists for email address “%s”" % profile_component)
+    self.data.update(profile = self.profile)
     
   def start_build(self, version, builder, repo_configuration):
     repo_configuration = tabularize(repo_configuration)

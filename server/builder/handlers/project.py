@@ -74,7 +74,7 @@ class ProjectHandler(BaseHandler):
       online_builders = [b for b in builders if b.is_online()]
       recent_builders = [b for b in builders if not b.is_online()]
     
-      last_used_builder = self.account.last_used_builder
+      last_used_builder = self.profile.last_used_builder
       if last_used_builder and last_used_builder.key() not in map(lambda b: b.key(), builders):
         last_used_builder = None
       
