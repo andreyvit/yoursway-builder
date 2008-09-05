@@ -9,6 +9,7 @@ from google.appengine.ext import db
 from builder.models import *
 from builder.handlers.base import prolog, BaseHandler
 
+from tabular import tabularize, untabularize
 from builder.data.perproject import script_info
 from builder.data.chosen_repos import repo_configuration_info
 
@@ -53,9 +54,12 @@ class BuildProjectHandler(BaseHandler):
 
     self.start_build(version, self.builder, repo_configuration)
     
-    if self.profile:
-      self.profile.last_used_builder = self.builder
-      self.profile.put()
+    self.profile.last_used_builder = self.builder
+    self.profile.put()
+        
+    update_or_insert(ProfileProjectPreferences, dict(profile = self.profile, project = self.project),
+      repository_choices = tabularize(repo_configuration.without_default_choices()),
+      initial_values = dict(project = self.project.key(), profile = self.profile.key()))
     
     self.redirect_and_finish('/projects/%s' % self.project.urlname(),
       flash = "Started bulding version %s. Please refresh this page to track status." % version)

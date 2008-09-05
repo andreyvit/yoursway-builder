@@ -34,7 +34,7 @@
 				<td>{{ repos.descr }}</td>
 				<td><select name="location_{{ repos.name }}">
 					{% for location in repos.locations %}
-						<option value="{{ location.name }}">{{ location.name }}</option>
+						<option value="{{ location.name }}" {% ifequal repos.chosen_one location.name %}selected="selected"{% endifequal %}>{{ location.name }}</option>
 					{% endfor %}
 				</select></td>
 			</tr>

@@ -1,10 +1,55 @@
 # -*- coding: utf-8 -*-
+import logging
 from google.appengine.ext import db
 
 from yslib.dates import time_delta_in_words, delta_to_seconds
 from tabular import tabularize, untabularize
 from builder.data.perproject import script_info
+
+def transaction(method):
+  def decorate(*args, **kwds):
+    return db.run_in_transaction(method, *args, **kwds)
+  return decorate
   
+def calculate_key_name(klass, key_name):
+  if type(key_name) in (str, unicode):
+    return key_name
+  if type(key_name) in (list, tuple):
+    return klass.key_for(*key_name)
+  if type(key_name) is dict:
+    return klass.key_for(**key_name)
+  raise "Invalid key name %s for %s" % (key_name, klass.__name__)
+    
+@transaction
+def find_or_create(klass, key_name, initial_values = {}):
+  key_name = calculate_key_name(klass, key_name)
+  model = klass.get_by_key_name(key_name)
+  if model == None:
+    model = klass(key_name = key_name, **initial_values)
+  return model
+    
+@transaction
+def update_or_insert(klass, key_name, initial_values, **values):
+  key_name = calculate_key_name(klass, key_name)
+  model = klass.get_by_key_name(key_name)
+  if model == None:
+    logging.info("Creating %s with key %s" % (klass.__name__, key_name))
+    model = klass(key_name = key_name, **initial_values)
+  else:
+    logging.info("Existing %s with key %s" % (klass.__name__, key_name))
+  for k, v in values.iteritems():
+    setattr(model, k, v)
+  model.put()
+  
+def id_or_name_of(key_or_model_or_id_or_name):
+  if type(key_or_model_or_id_or_name) is db.Key:
+    return key_or_model_or_id_or_name.id_or_name()
+  elif isinstance(key_or_model_or_id_or_name, db.Model):
+    return key_or_model_or_id_or_name.key().id_or_name()
+  elif type(key_or_model_or_id_or_name) in (str, unicode, int):
+    return key_or_model_or_id_or_name
+  raise "Illegal value passed to id_or_name_of: %s" % key_or_model_or_id_or_name
+
 def calculate_next_version(latest_build):
   if latest_build is None:
     return '0.0.1'
@@ -254,3 +299,12 @@ class Profile(db.Model):
 
   def urlname(self):
     return self.email
+
+class ProfileProjectPreferences(db.Model):
+  profile = db.ReferenceProperty(Profile, collection_name = "per_project_preferences")
+  project = db.ReferenceProperty(Project, collection_name = "per_profile_preferences")
+  repository_choices = db.TextProperty(default = '')
+
+  @staticmethod
+  def key_for(profile, project):
+    return "k%s_%s" % (id_or_name_of(profile), id_or_name_of(project))

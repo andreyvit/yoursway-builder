@@ -10,6 +10,7 @@ from builder.models import *
 from builder.handlers.base import prolog, BaseHandler
 
 from builder.utils import create_token
+from builder.data.chosen_repos import repo_configuration_info
 
 class CreateEditProjectHandler(BaseHandler):
   @prolog(path_components = ['project'], required_level = ADMIN_LEVEL)
@@ -69,6 +70,9 @@ class ProjectHandler(BaseHandler):
   
   @prolog(path_components = ['project'])
   def get(self, project_key):
+    
+    prefs = find_or_create(ProfileProjectPreferences, dict(profile = self.profile, project = self.project))
+    
     if self.effective_level > VIEWER_LEVEL:
       builders = self.fetch_active_builders()
       online_builders = [b for b in builders if b.is_online()]
@@ -77,6 +81,14 @@ class ProjectHandler(BaseHandler):
       last_used_builder = self.profile.last_used_builder
       if last_used_builder and last_used_builder.key() not in map(lambda b: b.key(), builders):
         last_used_builder = None
+        
+      repo_configuration = untabularize(repo_configuration_info(), prefs.repository_choices)
+      script_info = self.project.script_info()
+      for repos in script_info.alternable_repositories:
+        if repo_configuration.has(repos.name):
+          repos.chosen_one = repo_configuration.get(repos.name).location_name
+        else:
+          repos.chosen_one = 'default'
       
       self.data.update(online_builders = online_builders, recent_builders = recent_builders,
         builders = online_builders + recent_builders, last_used_builder = last_used_builder)
