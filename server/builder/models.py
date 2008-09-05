@@ -1,8 +1,17 @@
+# -*- coding: utf-8 -*-
 from google.appengine.ext import db
 
 from yslib.dates import time_delta_in_words, delta_to_seconds
 from tabular import tabularize, untabularize
 from builder.data.perproject import script_info
+  
+def calculate_next_version(latest_build):
+  if latest_build is None:
+    return '0.0.1'
+  else:
+    v = latest_build.version.split('.')
+    v[-1] = str(int(v[-1]) + 1)
+    return ".".join(v)
 
 class InstallationConfig(db.Model):
   server_name = db.TextProperty(default = 'YourSway Builder')
