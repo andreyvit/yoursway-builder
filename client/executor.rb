@@ -662,7 +662,7 @@ private
     else
       return actions.split(',').collect do |action|
         case action
-        when 'add', 'remove', 'replace', 'update' then :"#{action}"
+        when 'add', 'append', 'remove', 'replace', 'update' then :"#{action}"
         else raise BuildScriptError, "Invalid action '#{action}' in SYNC command"
         end
       end
