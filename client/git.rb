@@ -172,4 +172,7 @@ class LocalPseudoRepository
     @local_dir
   end
   
+  def set_preferred_location! location_name
+  end
+  
 end
