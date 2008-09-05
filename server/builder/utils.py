@@ -1,3 +1,5 @@
+
+from random import choice
       
 def append(list, item):
   list.append(item)

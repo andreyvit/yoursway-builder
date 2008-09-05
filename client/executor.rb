@@ -196,11 +196,14 @@ class Executor
   
   def define_repository name
     @repositories[name] ||= yield
-    @repositories[name].set_preferred_location! @preferred_locations[name] if @preferred_locations[name]
   end
   
   def redefine_repository! name, repos
     @repositories[name] = repos
+  end
+  
+  def configure_repository! name
+    @repositories[name].set_preferred_location! @preferred_locations[name] if @preferred_locations[name]
   end
   
   def define_store name
@@ -496,6 +499,8 @@ class ReposCommand < Command
     execute_subcommands!
     if override = @executor.override_for(@repos)
       @executor.redefine_repository! name, LocalPseudoRepository.new(override.local_dir, @repos.name)
+    else
+      @executor.configure_repository! name
     end
   end
   

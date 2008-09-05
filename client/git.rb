@@ -137,6 +137,12 @@ class Repository
   def fetch_version(item, feedback)
     active_location.fetch_version item, feedback
   end
+  
+  def set_preferred_location! location_name
+    raise BuildScriptError, "Too late to choose a location for #{@name}" unless @active_location.nil?
+    @active_location = @locations.find { |loc| loc.name == location_name }
+    raise "Location #{location_name} does not exist in repository #{@name}" if @active_location.nil?
+  end
 
 private
 

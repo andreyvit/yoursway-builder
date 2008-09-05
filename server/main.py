@@ -16,7 +16,6 @@ from appengine_utilities.flash import Flash
 
 from yslib.dates import time_delta_in_words, delta_to_seconds
 
-from random import choice
 from sets import Set
 
 from tabular import tabularize, untabularize
