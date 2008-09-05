@@ -54,10 +54,28 @@ module YourSway::Sync
       write_file! path, file
     end
     
+    def append! old_file, file
+      @feedback.info "Appending to #{old_file.rel_path} locally..."
+      path = File.join(@dir, old_file.rel_path)
+      raise "#{old_file.rel_path} does not exists" unless File.exist? path
+      
+      old_local_path = file.to_local_file
+      local_path = file.to_local_file
+      new_data = File.read(old_local_path) + File.read(local_path)
+      tempf = Tempfile.new('ysbldr-dwnld')
+      File.open(tempf.path, 'wb') { |f| f.write new_data }
+      
+      write_local! old_file.rel_path, tempf.path
+    end
+    
   private
   
     def write_file! path, file
       local_path = file.to_local_file
+      write_local! path, local_path
+    end
+    
+    def write_local! path, local_path
       File.open(path, 'wb') do |f|
         File.open(local_path, 'rb') do |inf|
           while chunk = inf.read(1024*1024) do
@@ -175,6 +193,16 @@ module YourSway::Sync
       add! old_file.rel_path, file
     end
     
+    def append! old_file, file
+      @feedback.info "Appending to #{old_file.rel_path} on S3..."
+      old_local_path = file.to_local_file
+      local_path = file.to_local_file
+      new_data = File.read(old_local_path) + File.read(local_path)
+      tempf = Tempfile.new('amazon')
+      File.open(tempf.path, 'wb') { |f| f.write new_data }
+      @connection.put_file rel_path, tempf.path
+    end
+    
     def remove! file
       @feedback.info "Deleting #{file.rel_path} on S3..."
       @connection.delete file.rel_path
@@ -255,6 +283,12 @@ module YourSway::Sync
       @modified = :"replace_#{party}"
     end
     
+    def enable_append! party, other
+      raise "cannot replace both #{party} and #{other}" if @modified == :"replace_#{other}"
+      raise "cannot both replace #{party} and update first or second" if @modified == :compare
+      @modified = :"append_#{party}"
+    end
+    
     def enable_update! party, other
       raise "cannot both update #{party} and replace either party" if @modified.to_s.starts_with? "replace"
       @modified = :compare
@@ -322,6 +356,8 @@ module YourSway::Sync
         when :just_enjoy
         when :replace_first  then q.enqueue { |_, fc, _| fc.replace! first_file, second_file }
         when :replace_second then q.enqueue { |_, _, sc| sc.replace! second_file, first_file }
+        when :append_first  then q.enqueue { |_, fc, _| fc.append! first_file, second_file }
+        when :append_second then q.enqueue { |_, _, sc| sc.append! second_file, first_file }
         when :compare
           q.enqueue do
             first_mtime  = first_file.mtime  # might block

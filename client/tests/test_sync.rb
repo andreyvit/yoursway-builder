@@ -66,7 +66,7 @@ def s3test name
   FileUtils.mkdir_p dir1
   
   s3 = AmazonS3.new('1QPPZJR04QSS118WTS82', File.read(File.expand_path('~/.s3secret')).strip)
-  s3p = S3Party.new(s3, 'updates.yoursway.com', 'test_')
+  s3p = S3Party.new(s3, 'updates.yoursway.com', 'test_', Foo.new)
 
   exp1, exp2 = yield dir1, s3p
   
@@ -87,13 +87,20 @@ def s3test name
 
 end
 
+class Foo
+  
+  def method_missing id, *args
+  end
+  
+end
+
 include YourSway::Sync
 
 test "Sync does nothing by default" do |dir1, dir2|
   write_file dir1, 'foo'
   
   m = SyncMapping.new('/', [], '/', [])
-  YourSway::Sync.synchronize LocalParty.new(dir1), LocalParty.new(dir2), [m]
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
   
   [['foo'], []]
 end
@@ -102,7 +109,17 @@ test "Sync adds files" do |dir1, dir2|
   write_file dir1, 'foo'
   
   m = SyncMapping.new('', [], '', [:add])
-  YourSway::Sync.synchronize LocalParty.new(dir1), LocalParty.new(dir2), [m]
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
+  
+  [['foo'], ['foo']]
+end
+
+test "Sync appends to files" do |dir1, dir2|
+  write_file dir1, 'foo'
+  write_file dir2, 'foo'
+  
+  m = SyncMapping.new('', [], '', [:append])
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
   
   [['foo'], ['foo']]
 end
@@ -111,7 +128,7 @@ test "Sync removes files" do |dir1, dir2|
   write_file dir2, 'foo'
   
   m = SyncMapping.new('', [], '', [:remove])
-  YourSway::Sync.synchronize LocalParty.new(dir1), LocalParty.new(dir2), [m]
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
   
   [[], []]
 end
@@ -121,7 +138,7 @@ test "Sync replaces files" do |dir1, dir2|
   write_file dir2, 'foo'
   
   m = SyncMapping.new('', [], '', [:replace])
-  YourSway::Sync.synchronize LocalParty.new(dir1), LocalParty.new(dir2), [m]
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
   
   [['foo'], ['foo']]
 end
@@ -131,7 +148,7 @@ test "Sync updates files" do |dir1, dir2|
   write_file dir2, 'foo'
   
   m = SyncMapping.new('', [], '', [:update])
-  YourSway::Sync.synchronize LocalParty.new(dir1), LocalParty.new(dir2), [m]
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
   
   [['foo'], ['foo']]
 end
@@ -141,7 +158,18 @@ s3test "Sync uploads to S3" do |dir, s3|
   write_file dir, 'foo'
 
   m = SyncMapping.new('', [], '', [:add, :replace])
-  YourSway::Sync.synchronize LocalParty.new(dir), s3, [m]
+  YourSway::Sync.synchronize LocalParty.new(dir, Foo.new), s3, [m]
+  
+  [['foo'], ['foo']]
+  
+end
+
+s3test "Sync appends to S3" do |dir, s3|
+  
+  write_file dir, 'foo'
+
+  m = SyncMapping.new('', [], '', [:append, :replace])
+  YourSway::Sync.synchronize LocalParty.new(dir, Foo.new), s3, [m]
   
   [['foo'], ['foo']]
   
@@ -150,7 +178,7 @@ end
 s3test "Sync downloads from S3" do |dir, s3|
   
   m = SyncMapping.new('', [:add, :replace], '', [])
-  YourSway::Sync.synchronize LocalParty.new(dir), s3, [m]
+  YourSway::Sync.synchronize LocalParty.new(dir, Foo.new), s3, [m]
   
   [['foo'], ['foo']]
   
@@ -159,7 +187,7 @@ end
 s3test "Deletes from S3" do |dir, s3|
   
   m = SyncMapping.new('', [], '', [:remove])
-  YourSway::Sync.synchronize LocalParty.new(dir), s3, [m]
+  YourSway::Sync.synchronize LocalParty.new(dir, Foo.new), s3, [m]
   
   [[], []]
   
