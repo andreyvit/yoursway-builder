@@ -159,7 +159,7 @@ module YourSway
     end
     
     def add_suffix suffix
-      if starts_with? suffix then self else "#{self}#{suffix}" end
+      if ends_with? suffix then self else "#{self}#{suffix}" end
     end
     
     def add_trailing_slash
@@ -175,7 +175,7 @@ module YourSway
     end
     
     def replace_prefix old_prefix, new_prefix
-      self[old_prefix.length..-1] + new_prefix
+      new_prefix + self[old_prefix.length..-1]
     end
     
   end

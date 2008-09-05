@@ -24,10 +24,14 @@ def list_entries_recursively(path, prefix = '', result = [])
 end
 
 def write_file(*names)
+  FileUtils.mkdir_p File.join(*names[0..-2])
   File.open(File.join(*names), 'w') { |f| f.puts Time.now }
 end
 
 def test name
+
+  puts
+  puts name
 
   dir1 = '/tmp/sync'
   dir2 = '/tmp/cnys'
@@ -59,6 +63,9 @@ end
 
 def s3test name
 
+  puts
+  puts name
+
   dir1 = '/tmp/sync'
 
   FileUtils.rm_rf dir1
@@ -89,7 +96,8 @@ end
 
 class Foo
   
-  def method_missing id, *args
+  def info *args
+    puts "INFO #{args.collect {|x| x.to_s}.join("\n")}"
   end
   
 end
@@ -131,6 +139,41 @@ test "Sync removes files" do |dir1, dir2|
   YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m]
   
   [[], []]
+end
+
+test "Sync adds files with multiple mappings" do |dir1, dir2|
+  write_file dir1, 'foo'
+  write_file dir1, 'xx', 'bar'
+  
+  m1 = SyncMapping.new('', [], '', [:add])
+  m2 = SyncMapping.new('xx', [], 'xx', [:add])
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m1, m2]
+  
+  [['foo', 'xx/', 'xx/bar'], ['foo', 'xx/', 'xx/bar']]
+end
+
+test "Sync adds and replaces files with multiple mappings" do |dir1, dir2|
+  write_file dir1, 'foo'
+  write_file dir1, 'xx', 'bar'
+  write_file dir2, 'xx', 'bar'
+  
+  m1 = SyncMapping.new('', [], '', [:add])
+  m2 = SyncMapping.new('xx', [], 'xx', [:add, :replace])
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m1, m2]
+  
+  [['foo', 'xx/', 'xx/bar'], ['foo', 'xx/', 'xx/bar']]
+end
+
+test "Sync adds and appends files with multiple mappings" do |dir1, dir2|
+  write_file dir1, 'foo'
+  write_file dir1, 'xx', 'bar'
+  write_file dir2, 'xx', 'bar'
+  
+  m1 = SyncMapping.new('', [], '', [:add])
+  m2 = SyncMapping.new('xx', [], 'xx', [:add, :append])
+  YourSway::Sync.synchronize LocalParty.new(dir1, Foo.new), LocalParty.new(dir2, Foo.new), [m1, m2]
+  
+  [['foo', 'xx/', 'xx/bar'], ['foo', 'xx/', 'xx/bar']]
 end
 
 test "Sync replaces files" do |dir1, dir2|

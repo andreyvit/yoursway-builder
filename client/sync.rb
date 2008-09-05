@@ -76,6 +76,7 @@ module YourSway::Sync
     end
     
     def write_local! path, local_path
+      FileUtils.mkdir_p File.dirname(path)
       File.open(path, 'wb') do |f|
         File.open(local_path, 'rb') do |inf|
           while chunk = inf.read(1024*1024) do
@@ -353,7 +354,7 @@ module YourSway::Sync
       end
       diff.on_both do |first_file, second_file|
         case mapping.modified
-        when :just_enjoy
+        when :just_enjoy then puts "Enjoying"
         when :replace_first  then q.enqueue { |_, fc, _| fc.replace! first_file, second_file }
         when :replace_second then q.enqueue { |_, _, sc| sc.replace! second_file, first_file }
         when :append_first  then q.enqueue { |_, fc, _| fc.append! first_file, second_file }
