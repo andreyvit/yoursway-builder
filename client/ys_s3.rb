@@ -113,6 +113,7 @@ class AmazonS3Connection
       end
     rescue
       File.unlink file_path
+      raise
     end
   end
   
