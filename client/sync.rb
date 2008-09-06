@@ -201,7 +201,7 @@ module YourSway::Sync
       new_data = File.read(old_local_path) + File.read(local_path)
       tempf = Tempfile.new('amazon')
       File.open(tempf.path, 'wb') { |f| f.write new_data }
-      @connection.put_file rel_path, tempf.path
+      @connection.put_file old_file.rel_path, tempf.path
     end
     
     def remove! file
