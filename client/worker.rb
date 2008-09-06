@@ -252,7 +252,7 @@ class ConsoleFeedback
     failure_reason = options[:failure_reason]
     if outcome == 'SUCCESS'
       puts "Successfully finished job #{id}"
-    elsif outcome == 'ABORT'
+    elsif outcome == 'ABORTED'
       puts "Aborted per server request (job #{id})"
     else
       puts "FAILURE REASON (message id #{id})\n"
@@ -409,6 +409,9 @@ def process_job feedback, builder_name, message_id, other_lines
     end
   
     report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
+  rescue Interrupt
+    outcome = "ABORTED"
+    failure_reason = "User abort at the builder side"
   rescue BuildAborted
     outcome = "ABORTED"
     failure_reason = ""
