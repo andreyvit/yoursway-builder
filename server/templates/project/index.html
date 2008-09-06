@@ -68,7 +68,7 @@
 <p>No builds yet — hit Build to make the first one!</p>
 {% endif %}
 {% for build in latest_builds %}
-<h3><a href="/projects/{{ project.urlname }}/builds/{{ build.urlname }}"><span style="color: {{build.state_color}}">{{ build.version }}</span></a>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'queued' %} <span style="">(waiting for builder){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %}</h3>
+<h3><a href="/projects/{{ project.urlname }}/builds/{{ build.urlname }}"><span style="color: {{build.state_color}}">{{ build.version }}</span></a>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'queued' %} <span style="">(waiting for builder){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %}{% ifequal build.state_name 'aborted' %} <span style="">(aborted){% endifequal %}</h3>
 	
 {% include '_build_state.html' %}
 	

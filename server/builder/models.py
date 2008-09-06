@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 from google.appengine.ext import db
+from google.appengine.api import memcache
 from datetime import datetime, timedelta
 
 from yslib.dates import time_delta_in_words, delta_to_seconds
@@ -14,6 +15,8 @@ def transaction(method):
   return decorate
   
 def calculate_key_name(klass, key_name):
+  if isinstance(key_name, db.Key):
+    return key_name.id_or_name()
   if type(key_name) in (str, unicode):
     return key_name
   if type(key_name) in (list, tuple):
@@ -39,6 +42,14 @@ def update_or_insert(klass, key_name, initial_values, **values):
     model = klass(key_name = key_name, **initial_values)
   else:
     logging.info("Existing %s with key %s" % (klass.__name__, key_name))
+  for k, v in values.iteritems():
+    setattr(model, k, v)
+  model.put()
+    
+@transaction
+def transactional_update(klass, key_name, **values):
+  key_name = calculate_key_name(klass, key_name)
+  model = klass.get_by_key_name(key_name)
   for k, v in values.iteritems():
     setattr(model, k, v)
   model.put()
@@ -158,19 +169,21 @@ BUILD_SUCCEEDED = 1
 BUILD_FAILED = 2
 BUILD_INPROGRESS = 3
 BUILD_QUEUED = 4
+BUILD_ABORTED = 5
     
 state_info = {
   BUILD_ABANDONED:  dict(name = 'abandoned',  color = 'grey'),
   BUILD_INPROGRESS: dict(name = 'inprogress', color = 'blue'),
   BUILD_QUEUED:     dict(name = 'queued',     color = 'blue'),
   BUILD_FAILED:     dict(name = 'failed',     color = 'red'),
-  BUILD_SUCCEEDED:    dict(name = 'succeeded',  color = 'green'),
+  BUILD_SUCCEEDED:  dict(name = 'succeeded',  color = 'green'),
+  BUILD_ABORTED:    dict(name = 'aborted',    color = 'grey'),
 }
 
 class Build(db.Model):
   project = db.ReferenceProperty(Project, collection_name = 'builds')
   builder = db.ReferenceProperty(Builder, collection_name = 'builds')
-  state = db.IntegerProperty(default = BUILD_ABANDONED, choices = [BUILD_INPROGRESS, BUILD_QUEUED, BUILD_SUCCEEDED, BUILD_FAILED, BUILD_ABANDONED])
+  state = db.IntegerProperty(default = BUILD_ABANDONED, choices = [BUILD_INPROGRESS, BUILD_QUEUED, BUILD_SUCCEEDED, BUILD_FAILED, BUILD_ABANDONED, BUILD_ABORTED])
   repo_configuration = db.TextProperty(default = '')
   version = db.StringProperty()
   report = db.TextProperty(default = '')
@@ -288,6 +301,7 @@ MESSAGE_QUEUED = 0
 MESSAGE_INPROGRESS = 1
 MESSAGE_DONE = 2
 MESSAGE_ABANDONED = 3
+MESSAGE_ABORTED = 4
     
 class Message(db.Model):
   builder = db.ReferenceProperty(Builder, collection_name = 'messages')
@@ -303,7 +317,7 @@ class Message(db.Model):
     
     key = "progress-%s" % (self.key())
     memcache.set(key, "FIN", time = 60*60)
-
+    
 class Profile(db.Model):
   user = db.UserProperty()
   email = db.EmailProperty()

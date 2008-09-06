@@ -157,9 +157,10 @@ class ServerCommunication
   
   def send_console message_id, data
     begin
-      try_network_operation do
+      body = try_network_operation do
         Net::HTTP.post_form message_progress_uri(message_id), 'console' => data
       end
+      raise BuildAborted.new if body == "ABORT"
     rescue NetworkError => e
       puts "#{e.message}, could not send console log."
     end
@@ -251,6 +252,8 @@ class ConsoleFeedback
     failure_reason = options[:failure_reason]
     if outcome == 'SUCCESS'
       puts "Successfully finished job #{id}"
+    elsif outcome == 'ABORT'
+      puts "Aborted per server request (job #{id})"
     else
       puts "FAILURE REASON (message id #{id})\n"
       puts "#{failure_reason}"
@@ -274,6 +277,9 @@ class ConsoleFeedback
     puts message
   end
   
+end
+
+class BuildAborted < StandardError
 end
 
 class NetworkFeedback
@@ -403,6 +409,9 @@ def process_job feedback, builder_name, message_id, other_lines
     end
   
     report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
+  rescue BuildAborted
+    outcome = "ABORTED"
+    failure_reason = ""
   rescue Exception
     outcome = "ERR"
     failure_reason = "#{$!.class.name}: #{$!.message}\n#{($!.backtrace || []).join("\n")}"

@@ -217,3 +217,21 @@ class BaseHandler(webapp.RequestHandler):
 
     message = Message(builder = builder, build = build, body = body)
     message.put()
+    
+  def get_message_control(self, message_key):
+    result = memcache.get("control-%s" % message_key)
+    if result is None:
+      if not hasattr(self, 'message'):
+        self.message = Message.get(message_key)
+      if self.message.state == MESSAGE_ABORTED:
+        result = 'ABORT'
+      else:
+        result = 'OK'
+      memcache.add("control-%s" % message_key, result)
+    return result
+
+  def invalidate_message_control(self, message_key):
+    memcache.delete("control-%s" % message_key)
+    
+  def update_message_console(self, message_key, console):
+    memcache.set("progress-%s" % message_key, console, time = 60*60)

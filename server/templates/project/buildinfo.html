@@ -8,7 +8,7 @@
 
 {% block content %}
 
-<h1>Build <span style="color: {{build.state_color}}">{{ build.version }}</span>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'queued' %} <span style="">(waiting for builder){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %} of {{ project.name }}</h1>       
+<h1>Build <span style="color: {{build.state_color}}">{{ build.version }}</span>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'queued' %} <span style="">(waiting for builder){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %}{% ifequal build.state_name 'aborted' %} <span style="">(aborted){% endifequal %} of {{ project.name }}</h1>       
 
 <p><a class="nav" href="/projects/{{ project.urlname }}">« Go back to the project</a></p>
 

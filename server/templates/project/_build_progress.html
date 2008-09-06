@@ -1,6 +1,9 @@
 {% if build.active_message %}
-	<pre id="output_{{ build.key.id }}" style="margin: 10px 40px; background: black; color: white; font-size: 9pt; border: 1px dotted white; padding: 10px; height: 200px; overflow-y: scroll;"></pre>
-	<script>periodically_update({id: 'output_{{ build.key.id }}', 
-		period: 2000, timeout: 15000,
-		url: "/messages/{{ build.active_message.key }}/console"});</script>
+	<div style="margin: 10px 40px">
+		<pre id="output_{{ build.key.id }}" style="margin: 10px 0px; background: black; color: white; font-size: 9pt; border: 1px dotted white; padding: 10px; height: 200px; overflow-y: scroll;"></pre>
+		<script>periodically_update({id: 'output_{{ build.key.id }}', 
+			period: 2000, timeout: 15000,
+			url: "/messages/{{ build.active_message.key }}/console"});</script>
+		<p><a href="/projects/{{ project.urlname }}/builds/{{ build.urlname }}/abort" class="nav">Abort this build</a></p>
+	</div>
 {% endif %}

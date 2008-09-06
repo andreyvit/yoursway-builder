@@ -98,6 +98,45 @@ class StartContinuousBuildProjectHandler(BaseHandler):
     self.response.out.write("OK\t%s" % version)
     
   get = post
+  
+@transaction
+def set_build_to_aborted(build_key):
+  build = Build.get(build_key)
+  if build.state in [BUILD_FAILED, BUILD_SUCCEEDED, BUILD_ABANDONED, BUILD_ABORTED]:
+    return False
+  build.state = BUILD_ABORTED
+  build.put()
+  return True
+  
+@transaction
+def set_message_to_aborted(message_key):
+  message = Message.get(message_key)
+  if message.state in [MESSAGE_DONE, MESSAGE_ABANDONED, MESSAGE_ABORTED]:
+    return False
+  message.state = MESSAGE_ABORTED
+  message.put()
+  return True
+
+class AbortProjectBuildHandler(BaseHandler):
+  @prolog(path_components = ['project', 'build'], required_level = NORMAL_LEVEL)
+  def post(self, project_key, build_key):
+    anything_done = set_build_to_aborted(self.build.key())
+    
+    messages = self.build.messages.filter('state =', MESSAGE_INPROGRESS).fetch(100)
+    messages += self.build.messages.filter('state =', MESSAGE_QUEUED).fetch(100)
+    for message in messages:
+      anything_done = set_message_to_aborted(message.key()) or anything_done
+      memcache.delete("progress-%s" % message.key())
+      self.invalidate_message_control(message.key())
+    
+    if anything_done:
+      self.redirect_and_finish('/projects/%s' % self.project.urlname(),
+        flash = "Aborted bulding of version %s." % self.build.version)
+    else:
+      self.redirect_and_finish('/projects/%s' % self.project.urlname(),
+        flash = "Nothing to abort: building of version %s has already been finished." % self.build.version)
+    
+  get = post
 
 class BuilderObtainWorkHandler(BaseHandler):
   def get(self):
@@ -143,6 +182,14 @@ class BuilderObtainWorkHandler(BaseHandler):
       
     self.builder.last_check_at = datetime.now()
     self.builder.put()
+    
+@transaction
+def update_build_state_as_reported_by_builder(build_key, new_state, report, failure_reason = None):
+  build = Build.get(build_key)
+  build.state = new_state
+  build.failure_reason = failure_reason
+  build.report = report
+  build.put()
 
 class BuilderMessageDoneHandler(BaseHandler):
   @prolog(path_components = ['builder'])
@@ -165,26 +212,26 @@ class BuilderMessageDoneHandler(BaseHandler):
     message.put()
     
     build = message.build
-    build.report = report
     
     outcome = self.request.get("outcome")
     if outcome == 'ERR':
-      build.state = BUILD_FAILED
-      build.failure_reason = self.request.get("failure_reason")
+      update_build_state_as_reported_by_builder(build.key(), BUILD_FAILED, report = report, failure_reason = self.request.get("failure_reason"))
     elif outcome == 'SUCCESS':
-      build.state = BUILD_SUCCEEDED
+      update_build_state_as_reported_by_builder(build.key(), BUILD_SUCCEEDED, report = report)
+    elif outcome == 'ABORTED':
+      update_build_state_as_reported_by_builder(build.key(), BUILD_ABORTED, report = report)
     else:
-      build.state = BUILD_ABANDONED
-    build.put()
+      update_build_state_as_reported_by_builder(build.key(), BUILD_FAILED, report = report, failure_reason = "Illegal outcome %s" % outcome)
 
-    key = "progress-%s" % (message_key)
-    memcache.set(key, "FIN", time = 60*60)
+    self.update_message_console(message_key, "FIN")
 
 class ReportProgressHandler(BaseHandler):
   def post(self, message_key):
     console = self.request.get('console')
-    key = "progress-%s" % (message_key)
-    memcache.set(key, console, time = 60*60)
+    self.update_message_console(message_key, console)
+    
+    control = self.get_message_control(message_key)
+    self.response.out.write(control)
     
     # bs = memcache.get("message-builderstate-%s" % message_key)
     # if bs is None:
