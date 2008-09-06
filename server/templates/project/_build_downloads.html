@@ -1,0 +1,19 @@
+{% if build.stores %}
+  <dl>
+  {% for store in build.stores %}
+    <dt>Download from <b>{{ store.description }}</b>:</dt>
+    {% for item in store.items %}
+      <dd>
+        {% if item.url_location %}
+          <a href="{{ item.url_location.path }}"><b>{{ item.description }}</b></a>
+        {% else %}
+          <b>{{ item.description}}</b>
+        {% endif %}
+        {% for location in item.other_locations %}
+          <div style="font-size: smaller; margin-left: 20px;">{{ location.path }}</div>
+        {% endfor %}
+      </dd>
+    {% endfor %}
+  {% endfor %}
+  </dl>
+{% endif %}

@@ -1,0 +1,8 @@
+<p>
+  {% ifequal build.state_name 'queued' %}<b style="color: blue;">Queued,</b> waiting for builder… start was{% endifequal %}
+  {% ifequal build.state_name 'inprogress' %}<img src="/images/indicator.gif" width="16" height="16"> Building… start was {% endifequal %}
+  {% ifequal build.state_name 'abandoned' %}Never finished. Start was{% endifequal %}
+  {% ifequal build.state_name 'failed' %}<b style="color: red;">Failed.</b> Start was{% endifequal %}
+  {% ifequal build.state_name 'succeeded' %}<b style="color: green;">Succeeded.</b> Start was{% endifequal %}
+  <i>{{ build.since_start|revtimedelta }}</i> on {{ build.created_at|date }} — {{ build.created_by.nickname }} — builder {{ build.builder.name }}.
+</p>

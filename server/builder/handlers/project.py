@@ -105,13 +105,7 @@ class ProjectHandler(BaseHandler):
     recent_builds = builds[0:num_recent]
     for build in latest_builds:
       build.calculate_derived_data()
-      
-      if build.state in (BUILD_QUEUED, BUILD_INPROGRESS):
-        active_message = build.messages.filter('state =', 1).get()
-        if active_message is None:
-          active_message = build.messages.filter('state =', 0).get()
-        build.set_active_message(active_message)
-      
+      build.calculate_active_message()
 
     next_version = calculate_next_version(builds[0] if builds else None)
     

@@ -18,6 +18,7 @@ class ProjectBuildHandler(BaseHandler):
   def get(self, project_key, build_key):
     self.build.calculate_time_deltas(self.now)
     self.build.calculate_derived_data()
+    self.build.calculate_active_message()
     self.render_and_finish('project', 'buildinfo.html')
 
 class BuildProjectHandler(BaseHandler):

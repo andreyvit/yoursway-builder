@@ -233,6 +233,13 @@ class Build(db.Model):
     self._stores = stores.values()
     self._stores = filter(lambda store: len(store['items']) > 0, self._stores)
     
+  def calculate_active_message(self):
+    if self.state in (BUILD_QUEUED, BUILD_INPROGRESS):
+      active_message = self.messages.filter('state =', 1).get()
+      if active_message is None:
+        active_message = self.messages.filter('state =', 0).get()
+      self.set_active_message(active_message)
+    
   def calculate_time_deltas(self, now):
     self._since_start = (now - self.created_at)
     

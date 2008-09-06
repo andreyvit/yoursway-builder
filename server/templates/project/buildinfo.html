@@ -2,46 +2,25 @@
 
 {% block title %}Build {{ build.version }} of {{ project.name }}{% endblock %}
 
+{% block head %}
+<script src="/javascript/ajax.js"></script>
+{% endblock %}
+
 {% block content %}
 
 <h1>Build <span style="color: {{build.state_color}}">{{ build.version }}</span>{% ifequal build.state_name 'inprogress' %} <span style="">(in progress){% endifequal %}{% ifequal build.state_name 'queued' %} <span style="">(waiting for builder){% endifequal %}{% ifequal build.state_name 'abandoned' %} <span style="">(never finished){% endifequal %} of {{ project.name }}</h1>       
 
 <p><a class="nav" href="/projects/{{ project.urlname }}">« Go back to the project</a></p>
 
-<p>
-  {% ifequal build.state_name 'queued' %}<b style="color: blue;">Queued,</b> waiting for builder… start was{% endifequal %}
-  {% ifequal build.state_name 'inprogress' %}<img src="/images/indicator.gif" width="16" height="16"> Building… start was {% endifequal %}
-  {% ifequal build.state_name 'abandoned' %}Never finished. Start was{% endifequal %}
-  {% ifequal build.state_name 'failed' %}<b style="color: red;">Failed.</b> Start was{% endifequal %}
-  {% ifequal build.state_name 'succeeded' %}<b style="color: green;">Succeeded.</b> Start was{% endifequal %}
-  <i>{{ build.since_start|revtimedelta }}</i> on {{ build.created_at|date }} — {{ build.created_by.nickname }} — builder {{ build.builder.name }}.
-</p>
+{% include '_build_state.html' %}
 
 {% ifequal build.state_name 'failed' %}
   <p>Error:</p>
   <pre style="font: smaller;">{{ build.failure_reason}}</pre>
 {% endifequal %}
 
-{% if build.stores %}
-  <dl>
-  {% for store in build.stores %}
-    <dt>Download from <b>{{ store.description }}</b>:</dt>
-    {% for item in store.items %}
-      <dd>
-        {% if item.url_location %}
-          <a href="{{ item.url_location.path }}"><b>{{ item.description }}</b></a>
-        {% else %}
-          <b>{{ item.description}}</b>
-        {% endif %}
-        {% for location in item.other_locations %}
-          <div style="font-size: smaller; margin-left: 20px;">{{ location.path }}</div>
-        {% endfor %}
-      </dd>
-    {% endfor %}
-  {% endfor %}
-  </dl>
-{% endif %}
-
+{% include '_build_progress.html' %}
+{% include '_build_downloads.html' %}
 {% include '_build_overrides.html' %}
 
 <h2>Raw report</h2>
