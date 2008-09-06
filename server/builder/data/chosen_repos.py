@@ -41,6 +41,12 @@ class repo_configuration_info(object):
         result.add_choice(copy(choice))
     return result
     
+  def has_overrides(self):
+    for choice in self.choices:
+      if not choice.is_default():
+        return True
+    return False
+    
 class repo_choice_info(object):
   
   def __init__(self, repos_name, reason, location_name):

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from yslib.dates import time_delta_in_words, delta_to_seconds
 from tabular import tabularize, untabularize
 from builder.data.perproject import script_info
+from builder.data.chosen_repos import repo_configuration_info
 
 def transaction(method):
   def decorate(*args, **kwds):
@@ -174,6 +175,8 @@ class Build(db.Model):
   version = db.StringProperty()
   report = db.TextProperty(default = '')
   failure_reason = db.TextProperty(default = '')
+  has_server_overrides = db.BooleanProperty(default = False)
+  has_client_overrides = db.BooleanProperty(default = None)
   created_at = db.DateTimeProperty(auto_now_add = True)
   created_by = db.UserProperty()
       
@@ -268,6 +271,11 @@ class Build(db.Model):
     
   def is_queued_or_in_progress(self):
     return self.state in [BUILD_QUEUED, BUILD_INPROGRESS]
+    
+  def repo_configuration_obj(self):
+    if not hasattr(self, 'x_repo_configuration'):
+      self.x_repo_configuration = untabularize(repo_configuration_info(), self.repo_configuration)
+    return self.x_repo_configuration
     
 MESSAGE_QUEUED = 0
 MESSAGE_INPROGRESS = 1

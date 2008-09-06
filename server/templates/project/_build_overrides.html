@@ -1,0 +1,11 @@
+{% if build.has_server_overrides %}
+	<table style="border-left: 10px solid black; margin-top: 10px; margin-left: 20px; padding-left: 15px;">
+		<caption>Repositories</caption>
+		{% for choice in build.repo_configuration_obj.choices %}
+			<tr>
+				<td>{{ choice.repos_name }}</td>
+				<td>{% ifnotequal choice.reason 'default' %}<b>{{ choice.location_name }}</b> (overriden){% else %}{{ choice.location_name }}{% endifnotequal %}</td>
+			</tr>
+		{% endfor %}
+	</table>
+{% endif %}

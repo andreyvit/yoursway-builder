@@ -205,14 +205,15 @@ class BaseHandler(webapp.RequestHandler):
     self.data.update(profile = self.profile)
     
   def start_build(self, version, builder, repo_configuration):
-    repo_configuration = tabularize(repo_configuration)
+    repo_configuration_str = tabularize(repo_configuration)
     
     build = Build(project = self.project, version = version, builder = builder, created_by = self.user,
-      repo_configuration = repo_configuration, state = BUILD_QUEUED)
+      repo_configuration = repo_configuration_str, state = BUILD_QUEUED,
+      has_server_overrides = repo_configuration.has_overrides())
     build.put()
 
     body = "SET\tver\t%s\nPROJECT\t%s\t%s\n%s\n%s\n%s" % (version, self.project.permalink, self.project.name,
-      self.config.common_script, repo_configuration, self.project.script)
+      self.config.common_script, repo_configuration_str, self.project.script)
 
     message = Message(builder = builder, build = build, body = body)
     message.put()
