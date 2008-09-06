@@ -87,8 +87,29 @@
 
 {% endfor %}
 
+{% if successful_builds %}
+<h2>{{ num_successful }} latest successful builds</h2>
+<table border="1" style="border-collapse: collapse;" cellspacing="0" cellpadding="4">
+  <tr>
+    <th>Version</th>
+    <th colspan="2">Date</th>
+    <th>Initiated by</th>
+    <th>Builder</th>
+  </tr>
+  {% for build in successful_builds %}
+    <tr>
+      <td><a href="/projects/{{ project.urlname }}/builds/{{ build.urlname }}"><span style="color: {{build.state_color}}">{{ build.version }}</span></a></td>
+      <td>{{ build.since_start|revtimedelta }}</td>
+      <td>{{ build.created_at|date }}</td>
+      <td>{{ build.created_by.nickname }}</td>
+      <td>{{ build.builder.name }}</td>
+    </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 {% if recent_builds %}
-<h2>Summary of {{ num_recent_builds }} latest builds</h2>
+<h2>{{ num_recent_builds }} latest unsuccessful builds</h2>
 <table border="1" style="border-collapse: collapse;" cellspacing="0" cellpadding="4">
   <tr>
     <th>Version</th>

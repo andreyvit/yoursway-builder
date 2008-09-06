@@ -106,14 +106,23 @@ class ProjectHandler(BaseHandler):
     for build in latest_builds:
       build.calculate_derived_data()
       build.calculate_active_message()
+      
+    recent_builds = filter(lambda build: build.state != BUILD_SUCCEEDED, recent_builds)
+
+    num_successful = num_recent
+    successful_builds = self.project.builds.filter('state =', BUILD_SUCCEEDED).order('-created_at').fetch(num_successful)
+    for build in successful_builds:
+      build.calculate_time_deltas(self.now)
 
     next_version = calculate_next_version(builds[0] if builds else None)
     
     self.data.update(
       latest_builds = latest_builds,
       recent_builds = recent_builds,
+      successful_builds = successful_builds,
       num_latest_builds = num_latest,
       num_recent_builds = num_recent,
+      num_successful = num_successful,
       next_version = next_version,
     )
     self.render_and_finish('project', 'index.html')
