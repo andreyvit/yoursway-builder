@@ -279,6 +279,75 @@ class ConsoleFeedback
   
 end
 
+class FileFeedback
+  
+  def initialize file_name
+    @file_name = file_name
+    @file = File.open(file_name, 'w')
+    @on_prev_line = false
+  end
+  
+  def puts *data
+    @file.puts if @on_prev_line
+    @file.puts *data
+    @on_prev_line = false
+  end
+  
+  def start_job id
+    @file.puts "Starting job #{id}"
+  end
+  
+  def start_command command, is_long
+    return unless is_long
+    @file.puts
+    @file.puts "COMMAND: #{command}"
+    @file.flush
+  end
+  
+  def action message
+    @file.puts
+    @file.puts "ACTION: #{message}"
+    @file.flush
+  end
+  
+  def job_done id, options
+    outcome = options[:outcome]
+    failure_reason = options[:failure_reason]
+    if outcome == 'SUCCESS'
+      @file.puts "Successfully finished job #{id}"
+    elsif outcome == 'ABORTED'
+      @file.puts "Aborted per server request (job #{id})"
+    else
+      @file.puts "FAILURE REASON (message id #{id})\n"
+      @file.puts "#{failure_reason}"
+      @file.puts "END FAILURE REASON (message id #{id})"
+    end
+    @file.close
+  end
+  
+  def command_output output
+    $stdout.print output
+    @on_prev_line = !(output =~ /\n\Z/)
+  end
+  
+  def command_still_running
+  end
+  
+  def error message
+    @file.puts message
+    @file.flush
+  end
+  
+  def info message
+    @file.puts message
+  end
+  
+  def close
+    @file.close
+  end
+  
+end
+
 class BuildAborted < StandardError
 end
 
@@ -362,6 +431,16 @@ class Multicast
     @targets = targets
   end
   
+  def with_target target
+    @targets << target
+    begin
+      yield
+    ensure
+      @targets.delete target
+      target.close
+    end
+  end
+  
   def method_missing id, *args
     @targets.each { |t| t.send(id, *args) }
   end
@@ -372,6 +451,16 @@ feedback = ConsoleFeedback.new
 comm = ServerCommunication.new(feedback, config.server_host, config.builder_name, config.poll_interval)
 
 class ExecutionError < Exception
+end
+
+def process_stage stage, commands, executor
+  1.times do
+    retry if catch(:repeat_stage) do
+      executor.start_stage! stage
+      commands.each { |command| executor.execute_command! stage,  command }
+      executor.finish_stage! stage
+    end
+  end
 end
 
 def process_job feedback, builder_name, message_id, other_lines
@@ -403,9 +492,19 @@ def process_job feedback, builder_name, message_id, other_lines
   
       commands << executor.new_command(command, args, data)
     end
+
+    process_stage :project,     commands, executor
+    process_stage :set,         commands, executor
+    process_stage :definitions, commands, executor
     
-    commands.each do |command|
-      executor.execute_command! command
+    log_item = executor.define_default_item! :file, 'build.log',
+      "#{executor.resolve_variable('project')}-#{executor.resolve_variable('ver')}-buildlog.txt",
+      ['log', 'featured'],
+      "#{executor.resolve_variable('project-name')} #{executor.resolve_variable('ver')} Build Log"
+    
+    executor.allow_fetching_items!
+    feedback.with_target(FileFeedback.new(log_item.fetch_locally(nil))) do
+      process_stage :main,        commands, executor
     end
   
     report = executor.create_report.collect { |row| row.join("\t") }.join("\n")

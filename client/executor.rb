@@ -109,6 +109,16 @@ end
 class BuildScriptError < StandardError
 end
 
+class PostponeResolutionError < StandardError
+  
+  attr_reader :stage
+  
+  def initialize stage
+    @stage = stage
+  end
+  
+end
+
 class RepositoryOverride
   
   attr_reader :local_dir
@@ -139,7 +149,9 @@ class Executor
     @stores = {}
     @items = {}
     @aliases = {}
+    @postponed = {}
     @preferred_locations = {}
+    @item_fetching_allowed = false
     if File.directory? "/tmp" and not is_windows?
       @storage_dir = "/tmp/ysbuilder-#{builder_name}" 
     else
@@ -222,6 +234,13 @@ class Executor
     raise "Duplicate item #{item}" unless @items[name].nil?
     @items[name] = item
     @feedback.info "new item defined: [#{item.name}]"
+    item
+  end
+  
+  def define_default_item! kind, alias_name, name, tags, description
+    name = resolve_alias(name)
+    define_alias alias_name, name unless alias_name =~ /^-?$/
+    define_item! name, @local_store.new_item(kind, name, tags, description)
   end
   
   def define_variable name, value
@@ -239,20 +258,44 @@ class Executor
   def find_item name
     @items[name] or raise BuildScriptError, "Item #{name} not found"
   end
+  
+  def allow_fetching_items!
+    @item_fetching_allowed = true
+  end
+  
+  def start_stage! stage
+    @at_least_one_finished_on_this_stage = false
+    @repeat_this_stage = false
+  end
 
-  def execute_command! command
-    # resolve & subst refs
-    loop do
-      refs = command.collect_refs
-      break if refs.empty?
+  def execute_command! stage, command
+    return unless command.would_execute_on? stage
+    begin
+      # resolve & subst refs
+      loop do
+        refs = command.collect_refs
+        break if refs.empty?
       
-      values = {}
-      refs.each { |ref| values[ref.name] = resolve_ref(ref) }
-      command.subst_refs! values
-    end
+        values = {}
+        refs.each { |ref| values[ref.name] = resolve_ref(ref) }
+        command.subst_refs! values
+      end
     
-    @feedback.start_command command, command.is_long?
-    command.execute! self, @feedback
+      command.execute! stage, self, @feedback
+      @at_least_one_finished_on_this_stage = true
+    rescue PostponeResolutionError => e
+      if stage == e.stage
+        @repeat_this_stage = true
+        @feedback.info "#{command} will be repeated on stage #{stage}"
+      else
+        command.postpone! stage, e.stage
+        @feedback.info "#{command} postponed until stage #{e.stage}"
+      end
+    end
+  end
+  
+  def finish_stage! stage
+    throw :repeat_stage, true if @repeat_this_stage
   end
 
   def define_alias name, item_name
@@ -297,7 +340,12 @@ private
   end
   
   def resolve_ref ref
-    @variables[ref.name] or get_item(ref) or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
+    raise PostponeResolutionError.new(@postponed[ref.name]) if @postponed[ref.name]
+    if @item_fetching_allowed
+      @variables[ref.name] or get_item(ref) or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
+    else
+      @variables[ref.name] or raise PostponeResolutionError.new(:main)
+    end
   end
   
 end
@@ -338,6 +386,7 @@ class Command
     @data_lines = data_lines
     @raw_args = args
     @values = {}
+    @postpones = {}
   end
   
   def collect_refs
@@ -356,10 +405,27 @@ class Command
     command_name
   end
   
-  def execute! executor, feedback
+  def would_execute_on? stage
+    @postpones[stage] || self.respond_to?(stage_selector(stage))
+  end
+  
+  def execute! stage, executor, feedback
     @executor = executor
     @feedback = feedback
-    forward_to_handler! nil, :do_execute!, @raw_args
+    
+    @feedback.start_command self, is_long?
+    (@postpones[stage] || []).uniq.each do |as_stage|
+      forward_to_handler! nil, stage_selector(as_stage), @raw_args
+    end
+    forward_to_handler! nil, stage_selector(stage), @raw_args if self.respond_to?(stage_selector(stage))
+  end
+  
+  def postpone! act_as_stage, on_stage
+    (@postpones[on_stage] ||= []) << act_as_stage
+  end
+  
+  def stage_selector stage
+    case stage when :main then :do_execute! else :"do_execute_stage_#{stage}!" end
   end
   
 private
@@ -431,7 +497,7 @@ class ProjectCommand < Command
   
   acts_as_short
   
-  def do_execute! permalink, name
+  def do_execute_stage_project! permalink, name
     @executor.set_project! permalink, name
   end
   
@@ -441,8 +507,12 @@ class SetCommand < Command
   
   acts_as_short
   
-  def do_execute! name, value
+  def do_execute_stage_set! name, value
     @executor.define_variable name, value
+  end
+  
+  def to_s
+    "SET #{@raw_args[0]}"
   end
   
 end
@@ -493,7 +563,7 @@ class ReposCommand < Command
   
   acts_as_short
   
-  def do_execute! name, tags, description
+  def do_execute_stage_definitions! name, tags, description
     tags = parse_tags(tags)
     @repos = @executor.define_repository(name) { Repository.new(@executor.project_dir, name, tags, description) }
     execute_subcommands!
@@ -515,7 +585,7 @@ class StoreCommand < Command
   
   acts_as_short
   
-  def do_execute! name, tags, description
+  def do_execute_stage_definitions! name, tags, description
     tags = parse_tags(tags)
     @store = @executor.define_store(name) { RemoteStore.new(@executor.local_store, name, tags, description) }
     execute_subcommands!
@@ -542,7 +612,7 @@ class VersionCommand < Command
   
   acts_as_short
   
-  def do_execute! version_name, repos_name, *args
+  def do_execute_stage_definitions! version_name, repos_name, *args
     version_name = @executor.resolve_alias(version_name)
     repository = @executor.find_repository(repos_name)
     @executor.define_item! version_name, repository.create_item(version_name, *args)
@@ -580,7 +650,7 @@ class NewFileCommand < Command
   
   include ItemDefinitionCommands
   
-  def do_execute! alias_name, tags, name, description
+  def do_execute_stage_definitions! alias_name, tags, name, description
     execute_new_item! :file, alias_name, tags, name, description
   end
   
@@ -590,7 +660,7 @@ class NewDirCommand < Command
   
   include ItemDefinitionCommands
   
-  def do_execute! alias_name, tags, name, description
+  def do_execute_stage_definitions! alias_name, tags, name, description
     execute_new_item! :directory, alias_name, tags, name, description
   end
   
@@ -600,7 +670,7 @@ class FileCommand < Command
   
   include ItemDefinitionCommands
   
-  def do_execute! alias_name, tags, name, store_and_path
+  def do_execute_stage_definitions! alias_name, tags, name, store_and_path
     execute_existing_item! :file, alias_name, tags, name, store_and_path
   end
   
@@ -610,7 +680,7 @@ class DirCommand < Command
   
   include ItemDefinitionCommands
   
-  def do_execute! alias_name, tags, name, store_and_path
+  def do_execute_stage_definitions! alias_name, tags, name, store_and_path
     execute_existing_item! :directory, alias_name, tags, name, description
   end
   
@@ -620,7 +690,7 @@ class AliasCommand < Command
   
   acts_as_short
   
-  def do_execute! name, item_name
+  def do_execute_stage_definitions! name, item_name
     @executor.define_alias name, item_name
   end
   
@@ -881,7 +951,7 @@ end
 
 class ChooseCommand < Command
   
-  def do_execute! repo_name, reason, location_name
+  def do_execute_stage_definitions! repo_name, reason, location_name
     @executor.set_preferred_location repo_name, reason, location_name
   end
   
