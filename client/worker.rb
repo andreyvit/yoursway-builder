@@ -74,7 +74,7 @@ class Config
   attr_accessor :poll_interval, :poll_interval_overriden
 end
 config = Config.new
-config.server_host = "localhost:8080"
+config.server_host = "builder.yoursway.com"
 config.builder_name = `hostname`.strip.gsub(/\..*$/, '')
 config.poll_interval = 59 # a default, will be overridden from the server
 config.poll_interval_overriden = false
@@ -94,7 +94,7 @@ OptionParser.new do |opts|
     config.poll_interval = val
   end
 
-  opts.on_tail("--poll SECONDS", Integer, "override poll interval (ignore the interval set by the server)") do |val|
+  opts.on_tail("-p", "--poll SECONDS", Integer, "override poll interval (ignore the interval set by the server)") do |val|
     config.poll_interval = val
     config.poll_interval_overriden = true
   end
