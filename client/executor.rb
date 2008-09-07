@@ -109,6 +109,18 @@ end
 class BuildScriptError < StandardError
 end
 
+class ErrorneousRequireError < StandardError
+  
+  attr_reader :name
+  
+  def initialize name
+    @name = name
+  end
+end
+
+class UnresolvedNameError < StandardError
+end
+
 class PostponeResolutionError < StandardError
   
   attr_reader :stage
@@ -149,8 +161,10 @@ class Executor
     @stores = {}
     @items = {}
     @aliases = {}
+    @errorneous = {}
     @postponed = {}
     @preferred_locations = {}
+    @build_error = nil
     @item_fetching_allowed = false
     if File.directory? "/tmp" and not is_windows?
       @storage_dir = "/tmp/ysbuilder-#{builder_name}" 
@@ -291,11 +305,20 @@ class Executor
         command.postpone! stage, e.stage
         @feedback.info "#{command} postponed until stage #{e.stage}"
       end
+    rescue ErrorneousRequireError => e
+      @feedback.info "#{command} ignored because it requires '#{e.name}', but generation of '#{e.name}' has failed"
+    rescue StandardError => e
+      (command.defined_names rescue []).each { |name| @errorneous[name] = true }
+      @build_error ||= e
     end
   end
   
   def finish_stage! stage
     throw :repeat_stage, true if @repeat_this_stage
+  end
+  
+  def finish_build!
+    raise @build_error if @build_error
   end
 
   def define_alias name, item_name
@@ -340,6 +363,7 @@ private
   end
   
   def resolve_ref ref
+    raise ErrorneousRequireError.new(ref.name) if @errorneous[ref.name]
     raise PostponeResolutionError.new(@postponed[ref.name]) if @postponed[ref.name]
     if @item_fetching_allowed
       @variables[ref.name] or get_item(ref) or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
@@ -428,6 +452,10 @@ class Command
     case stage when :main then :do_execute! else :"do_execute_stage_#{stage}!" end
   end
   
+  def defined_names
+    []
+  end
+  
 private
 
   def execute_subcommands! *other_args
@@ -501,6 +529,10 @@ class ProjectCommand < Command
     @executor.set_project! permalink, name
   end
   
+  def defined_names
+    ['project', 'project-name']
+  end
+  
 end
 
 class SetCommand < Command
@@ -513,6 +545,12 @@ class SetCommand < Command
   
   def to_s
     "SET #{@raw_args[0]}"
+  end
+
+  def defined_names
+    name = @raw_args[0]
+    raise UnresolvedNameError if name =~ %r!/!
+    [name]
   end
   
 end
@@ -578,6 +616,12 @@ class ReposCommand < Command
     tags = parse_tags(tags)
     @repos.add_location GitLocation.new(name, tags, url)
   end
+
+  def defined_names
+    name = @raw_args[0]
+    raise UnresolvedNameError if name =~ %r!/!
+    [name]
+  end
   
 end
 
@@ -605,6 +649,12 @@ class StoreCommand < Command
     args[0] = parse_tags(args[0])
     @store.add_location! AmazonS3Location.new(*args)
   end
+
+  def defined_names
+    name = @raw_args[0]
+    raise UnresolvedNameError if name =~ %r!/!
+    [name]
+  end
   
 end
 
@@ -616,6 +666,12 @@ class VersionCommand < Command
     version_name = @executor.resolve_alias(version_name)
     repository = @executor.find_repository(repos_name)
     @executor.define_item! version_name, repository.create_item(version_name, *args)
+  end
+
+  def defined_names
+    name = @raw_args[0]
+    raise UnresolvedNameError if name =~ %r!/!
+    [name, @executor.resolve_alias(name)].uniq
   end
   
 end
@@ -642,7 +698,13 @@ module ItemDefinitionCommands
     store = @executor.find_store(store_name)
     @executor.define_item! name, store.existing_item(kind, name, tags, '')
   end
-  
+
+  def defined_names
+    alias_name, name = @raw_args[0], @raw_args[2]
+    raise UnresolvedNameError if alias_name =~ %r!/!
+    raise UnresolvedNameError if name =~ %r!/!
+    [alias_name, @executor.resolve_alias(name)].uniq
+  end
   
 end
 
@@ -692,6 +754,12 @@ class AliasCommand < Command
   
   def do_execute_stage_definitions! name, item_name
     @executor.define_alias name, item_name
+  end
+
+  def defined_names
+    name = @raw_args[0]
+    raise UnresolvedNameError if name =~ %r!/!
+    [name]
   end
   
 end

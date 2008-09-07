@@ -450,7 +450,7 @@ end
 feedback = ConsoleFeedback.new
 comm = ServerCommunication.new(feedback, config.server_host, config.builder_name, config.poll_interval)
 
-class ExecutionError < Exception
+class ExecutionError < StandardError
 end
 
 def process_stage stage, commands, executor
@@ -506,8 +506,8 @@ def process_job feedback, builder_name, message_id, other_lines
     feedback.with_target(FileFeedback.new(log_item.fetch_locally(nil))) do
       process_stage :main,        commands, executor
     end
-  
-    report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
+    
+    executor.finish_build!
   rescue Interrupt
     outcome = "ABORTED"
     failure_reason = "User abort at the builder side"
@@ -517,6 +517,12 @@ def process_job feedback, builder_name, message_id, other_lines
   rescue Exception
     outcome = "ERR"
     failure_reason = "#{$!.class.name}: #{$!.message}\n#{($!.backtrace || []).join("\n")}"
+  end
+  begin
+    report = executor.create_report.collect { |row| row.join("\t") }.join("\n")
+  rescue StandardError => e
+    puts "ERROR CREATING REPORT: #{e}"
+    report = ''
   end
   feedback.job_done message_id, :report => report, :outcome => outcome, :failure_reason => failure_reason
 end
