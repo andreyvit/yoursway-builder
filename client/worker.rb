@@ -501,6 +501,8 @@ def process_job feedback, builder_name, message_id, other_lines
       "#{executor.resolve_variable('project')}-#{executor.resolve_variable('ver')}-buildlog.txt",
       ['log', 'featured'],
       "#{executor.resolve_variable('project-name')} #{executor.resolve_variable('ver')} Build Log"
+      
+    executor.determine_inputs_and_outputs! commands
     
     executor.allow_fetching_items!
     feedback.with_target(FileFeedback.new(log_item.fetch_locally(nil))) do

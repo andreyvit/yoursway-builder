@@ -148,6 +148,22 @@ class RepositoryOverride
   
 end
 
+class Context
+  
+  def initialize
+    @output_items = {}
+  end
+  
+  def mark_for_output item
+    @output_items[item.name] = true
+  end
+  
+  def marked_for_output? item
+    @output_items[item.name] || false
+  end
+  
+end
+
 class Executor
   
   attr_reader :project_dir, :local_store
@@ -181,6 +197,14 @@ class Executor
         end
       end
     end
+  end
+  
+  def name_errorneous! name
+    @errorneous[name] = true
+  end
+  
+  def name_errorneous? name
+    @errorneous[name] || false
   end
   
   def new_command command, args, data_lines
@@ -283,6 +307,7 @@ class Executor
   end
 
   def execute_command! stage, command
+    return if command.errorneous?
     return unless command.would_execute_on? stage
     begin
       # resolve & subst refs
@@ -307,14 +332,42 @@ class Executor
       end
     rescue ErrorneousRequireError => e
       @feedback.info "#{command} ignored because it requires '#{e.name}', but generation of '#{e.name}' has failed"
+      command.errorneous! e
     rescue StandardError => e
-      (command.defined_names rescue []).each { |name| @errorneous[name] = true }
+      command.errorneous! e
       @build_error ||= e
     end
   end
   
   def finish_stage! stage
     throw :repeat_stage, true if @repeat_this_stage
+  end
+  
+  def determine_inputs_and_outputs! commands
+    context = Context.new
+    commands.each do |command|
+      next if command.errorneous?
+      begin
+        refs = command.collect_refs
+        refs.each do |ref|
+          next if @variables[ref.name] # not interested in variables
+        
+          name = resolve_alias(ref.name)
+          item = @items[name] or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
+          next unless item.in_local_store?
+          
+          if ref.tagged_with?('alter')
+            command.add_input! ref.name
+          elsif context.marked_for_output? item
+            command.add_input! ref.name
+          else
+            command.add_output! ref.name
+          end
+        end
+      rescue StandardError => e
+        command.errorneous! e
+      end
+    end
   end
   
   def finish_build!
@@ -363,7 +416,7 @@ private
   end
   
   def resolve_ref ref
-    raise ErrorneousRequireError.new(ref.name) if @errorneous[ref.name]
+    raise ErrorneousRequireError.new(ref.name) if name_errorneous?(ref.name)
     raise PostponeResolutionError.new(@postponed[ref.name]) if @postponed[ref.name]
     if @item_fetching_allowed
       @variables[ref.name] or get_item(ref) or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
@@ -411,6 +464,27 @@ class Command
     @raw_args = args
     @values = {}
     @postpones = {}
+    @inputs = []
+    @outputs = []
+    @errorneous = false
+  end
+  
+  def add_input! name
+    @inputs << name
+  end
+  
+  def add_output! name
+    @outputs << name
+  end
+  
+  def errorneous! error
+    puts "Command #{self} is errorneous"
+    @errorneous = true
+    @outputs.each { |name| @executor.name_errorneous! name }
+  end
+  
+  def errorneous?
+    @errorneous or @inputs.any? { |name| @executor.name_errorneous?(name) }
   end
   
   def collect_refs
