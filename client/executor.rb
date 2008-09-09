@@ -554,15 +554,15 @@ private
     self.send(id, *(prepend_args + args))
   end
 
-  def collect_refs_in string
+  def collect_refs_in string, pattern=PATTERN
     result = []
-    string.scan(PATTERN) { |ref, tags| result << Ref.new(ref, parse_tags(tags)) }
+    string.scan(pattern) { |ref, tags| result << Ref.new(ref, parse_tags(tags)) }
     return result
   end
 
-  def subst_refs_in string, values
+  def subst_refs_in string, values, pattern=PATTERN
     @values.merge! values
-    string.gsub(PATTERN) { |_| values[$1] }
+    string.gsub(pattern) { |_| values[$1] }
     #     tags = parse_tags($2)
     #     additional_variables[$1] or @variables[$1] or get_item($1, tags) or raise ExecutionError.new("Undefined variable or item [#{$1}]")
     #   }
@@ -1016,11 +1016,11 @@ end
 
 class SubstVarsCommand < Command
   
-  def do_execute! file
+  def do_execute! file, delimiters='[]'
     @additional_variables = {}
     execute_subcommands!
     data = File.read(file)
-    data = subst_variables(data)
+    data = subst_variables(data, delimiters[0..delimiters.length/2-1], delimiters[delimiters.length/2..-1])
     File.open(file, 'w') { |f| f.write data}
   end
   
@@ -1030,9 +1030,12 @@ class SubstVarsCommand < Command
   
 private
   
-  def subst_variables text
-     collect_refs_in(text).uniq.each { |ref| @additional_variables[ref.name] ||= @executor.resolve_variable(ref.name) }
-    subst_refs_in(text, @additional_variables)
+  def subst_variables text, beg, fin
+    beg_escaped = Regexp.escape(beg)
+    fin_escaped = Regexp.escape(fin)
+    pattern = /#{beg_escaped}([^#{beg_escaped}#{fin_escaped}]+)#{fin_escaped}/
+    collect_refs_in(text, pattern).uniq.each { |ref| @additional_variables[ref.name] ||= @executor.resolve_variable(ref.name) }
+    subst_refs_in(text, @additional_variables, pattern)
   end
   
 end
