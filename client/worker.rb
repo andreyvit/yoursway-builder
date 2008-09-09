@@ -326,7 +326,7 @@ class FileFeedback
   end
   
   def command_output output
-    $stdout.print output
+    @file.print output
     @on_prev_line = !(output =~ /\n\Z/)
   end
   
