@@ -14,7 +14,7 @@ from builder.data.perproject import script_info
 from builder.data.chosen_repos import repo_configuration_info
 
 class ProjectBuildHandler(BaseHandler):
-  @prolog(path_components = ['project', 'build'])
+  @prolog(path_components = ['project', 'build'], required_level = VIEWER_LEVEL)
   def get(self, project_key, build_key):
     self.build.calculate_time_deltas(self.now)
     self.build.calculate_derived_data()

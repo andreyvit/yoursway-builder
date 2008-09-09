@@ -68,7 +68,7 @@ class DeleteProjectHandler(BaseHandler):
 
 class ProjectHandler(BaseHandler):
   
-  @prolog(path_components = ['project'])
+  @prolog(path_components = ['project'], required_level = VIEWER_LEVEL)
   def get(self, project_key):
     
     prefs = find_or_create(ProfileProjectPreferences, dict(profile = self.profile, project = self.project))

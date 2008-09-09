@@ -34,6 +34,7 @@ class prolog(object):
         self.read_flash()
         self.read_config(config_needed = decor.config_needed)
         self.read_user()
+        self.required_level = decor.required_level
         self.effective_level = self.profile.level
         for func, arg in zip(decor.path_components, args):
           getattr(self, 'fetch_%s' % func)(arg)
@@ -168,7 +169,7 @@ class BaseHandler(webapp.RequestHandler):
       self.project = Project.by_urlname(project_component)
     if self.project == None:
       self.not_found("Project ‘%s’ does not exist" % project_component)
-    if not self.project.is_public and self.effective_level < VIEWER_LEVEL:
+    if self.required_level >= VIEWER_LEVEL and not self.project.is_public and self.effective_level < VIEWER_LEVEL:
       self.access_denied("Access denied to project ‘%s’" % project_component)
     self.data.update(project = self.project)
     
