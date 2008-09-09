@@ -8,6 +8,10 @@ class Item
   # name
   # fetch_locally
   
+  def is_per_build?
+    false
+  end
+  
 end
 
 class RepositoryItem < Item
@@ -36,6 +40,10 @@ module LocalItem
   end
   
   def is_fetching_very_fast?
+    true
+  end
+  
+  def is_per_build?
     true
   end
   
@@ -76,6 +84,10 @@ class StoreItem < Item
   
   def directory?
     :directory == kind
+  end
+  
+  def tagged_with? tag
+    @tags.include(tag)
   end
   
 end

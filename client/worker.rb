@@ -493,15 +493,17 @@ def process_job feedback, builder_name, message_id, other_lines
       commands << executor.new_command(command, args, data)
     end
 
+    process_stage :pure_set,   commands, executor
+    
+    executor.enable_references_expansion!
     process_stage :project,     commands, executor
     process_stage :set,         commands, executor
     process_stage :definitions, commands, executor
     
-    log_item = executor.define_default_item! :file, 'build.log',
-      "#{executor.resolve_variable('project')}-#{executor.resolve_variable('ver')}-buildlog.txt",
-      ['log', 'featured'],
-      "#{executor.resolve_variable('project-name')} #{executor.resolve_variable('ver')} Build Log"
-      
+    prefix = executor.resolve_variable('build-files-prefix')
+    descr_prefix = executor.resolve_variable('build-descr-prefix')
+    log_item = executor.define_default_item! :file, 'build.log', "#{prefix}-buildlog.txt", ['log', 'featured'], "#{descr_prefix} Build Log"
+    
     executor.determine_inputs_and_outputs! commands
     
     executor.allow_fetching_items!

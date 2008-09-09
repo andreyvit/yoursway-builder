@@ -182,6 +182,7 @@ class Executor
     @preferred_locations = {}
     @build_error = nil
     @item_fetching_allowed = false
+    @references_expansion_enabled = false
     if File.directory? "/tmp" and not is_windows?
       @storage_dir = "/tmp/ysbuilder-#{builder_name}" 
     else
@@ -237,6 +238,15 @@ class Executor
   def set_project! permalink, name
     @variables['project'] = permalink
     @variables['project-name'] = name
+    ver = @variables['ver'] or raise 'SET ver must have been executed before PROJECT'
+    
+    company = (@variables['company'] ||= '')
+    company_name = (@variables['company-name'] || '')
+    full_project = @variables['full-project'] = if company.empty? then "#{permalink}" else "#{company}-#{permalink}" end
+    full_project_name = @variables['full-project-name'] = if company_name.empty? then "#{name}" else "#{company_name} #{permalink}" end
+    @variables['build-files-prefix'] = "#{full_project}-#{ver}"
+    @variables['build-descr-prefix'] = "#{full_project_name} #{ver}"
+    
     @project_dir = File.join(@storage_dir, permalink)
     FileUtils.mkdir_p(@project_dir)
     
@@ -268,17 +278,26 @@ class Executor
     @aliases[name] || name
   end
   
-  def define_item! name, item
+  def define_item! item
+    name = item.name
     raise "Duplicate item #{item}" unless @items[name].nil?
     @items[name] = item
     @feedback.info "new item defined: [#{item.name}]"
     item
   end
   
+  def expand_per_build_name name
+    name.gsub('%', resolve_variable('build-files-prefix'))
+  end
+  
+  def expand_per_build_descr descr
+    descr.gsub('%', resolve_variable('build-descr-prefix'))
+  end
+  
   def define_default_item! kind, alias_name, name, tags, description
     name = resolve_alias(name)
     define_alias alias_name, name unless alias_name =~ /^-?$/
-    define_item! name, @local_store.new_item(kind, name, tags, description)
+    define_item! @local_store.new_item(kind, name, tags, description)
   end
   
   def define_variable name, value
@@ -305,19 +324,26 @@ class Executor
     @at_least_one_finished_on_this_stage = false
     @repeat_this_stage = false
   end
+  
+  def enable_references_expansion!
+    @references_expansion_enabled = true
+  end
 
   def execute_command! stage, command
     return if command.errorneous?
     return unless command.would_execute_on? stage
     begin
-      # resolve & subst refs
-      loop do
-        refs = command.collect_refs
-        break if refs.empty?
+      if @references_expansion_enabled
+        loop do
+          refs = command.collect_refs
+          break if refs.empty?
       
-        values = {}
-        refs.each { |ref| values[ref.name] = resolve_ref(ref) }
-        command.subst_refs! values
+          values = {}
+          refs.each { |ref| values[ref.name] = resolve_ref(ref) }
+          command.subst_refs! values
+        end
+      else
+        return unless command.collect_refs.empty?
       end
     
       command.execute! stage, self, @feedback
@@ -380,6 +406,10 @@ class Executor
   
   def resolve_variable name
     @variables[name] or raise ExecutionError.new("Undefined variable [#{name}]")
+  end
+  
+  def resolve_optional_variable name, default = nil
+    @variables[name] or default
   end
   
   def set_preferred_location repo_name, reason, location_name
@@ -613,6 +643,11 @@ class SetCommand < Command
   
   acts_as_short
   
+  
+  def do_execute_stage_pure_set! name, value
+    @executor.define_variable name, value
+  end
+  
   def do_execute_stage_set! name, value
     @executor.define_variable name, value
   end
@@ -739,7 +774,7 @@ class VersionCommand < Command
   def do_execute_stage_definitions! version_name, repos_name, *args
     version_name = @executor.resolve_alias(version_name)
     repository = @executor.find_repository(repos_name)
-    @executor.define_item! version_name, repository.create_item(version_name, *args)
+    @executor.define_item! repository.create_item(version_name, *args)
   end
 
   def defined_names
@@ -758,19 +793,23 @@ module ItemDefinitionCommands
   
   def execute_new_item! kind, alias_name, tags, name, description
     name = @executor.resolve_alias(name)
+    description = name if description == '' || description == '-'
+    name = @executor.expand_per_build_name(name)
+    description = @executor.expand_per_build_descr(description)
     @executor.define_alias alias_name, name unless alias_name =~ /^-?$/
     tags = parse_tags(tags)
-    @executor.define_item! name, @executor.local_store.new_item(kind, name, tags, description)
+    @executor.define_item! @executor.local_store.new_item(kind, name, tags, description)
   end
 
   def execute_existing_item! kind, alias_name, tags, name, store_and_path
     name = @executor.resolve_alias(name)
     @executor.define_alias alias_name, name unless alias_name =~ /^-?$/
     tags = parse_tags(tags)
+    description = name if description == '' || description == '-'
     
     store_name, path = store_and_path.split('/')
     store = @executor.find_store(store_name)
-    @executor.define_item! name, store.existing_item(kind, name, tags, '')
+    @executor.define_item! store.existing_item(kind, name, tags, '')
   end
 
   def defined_names
