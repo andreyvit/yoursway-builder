@@ -240,8 +240,8 @@ class Executor
     @variables['project-name'] = name
     ver = @variables['ver'] or raise 'SET ver must have been executed before PROJECT'
     
-    company = (@variables['company'] ||= '')
-    company_name = (@variables['company-name'] || '')
+    company = (@variables['company-permalink'] ||= '')
+    company_name = (@variables['company'] || '')
     full_project = @variables['full-project'] = if company.empty? then "#{permalink}" else "#{company}-#{permalink}" end
     full_project_name = @variables['full-project-name'] = if company_name.empty? then "#{name}" else "#{company_name} #{permalink}" end
     @variables['build-files-prefix'] = "#{full_project}-#{ver}"
