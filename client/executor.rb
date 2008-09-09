@@ -243,7 +243,7 @@ class Executor
     company = (@variables['company-permalink'] ||= '')
     company_name = (@variables['company'] || '')
     full_project = @variables['full-project'] = if company.empty? then "#{permalink}" else "#{company}-#{permalink}" end
-    full_project_name = @variables['full-project-name'] = if company_name.empty? then "#{name}" else "#{company_name} #{permalink}" end
+    full_project_name = @variables['full-project-name'] = if company_name.empty? then "#{name}" else "#{company_name} #{name}" end
     @variables['build-files-prefix'] = "#{full_project}-#{ver}"
     @variables['build-descr-prefix'] = "#{full_project_name} #{ver}"
     
