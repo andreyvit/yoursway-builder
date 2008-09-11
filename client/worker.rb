@@ -78,7 +78,8 @@ class Config
 end
 config = Config.new
 config.server_host = "builder.yoursway.com"
-config.builder_name = `hostname`.strip.gsub(/\..*$/, '')
+config.builder_name = "#{ENV['USER'] || ENV['LOGNAME'] || 'unknown'}@#{`hostname`.strip.gsub(/\..*$/, '')}"
+config.builder_name = ENV['BUILDER_NAME'] unless (ENV['BUILDER_NAME'] || '').empty?
 config.poll_interval = 59 # a default, will be overridden from the server
 config.poll_interval_overriden = false
 config.automatic_updates = (ENV['BUILDER_SELFUPDATE'] || 'false') == 'true'

@@ -3,6 +3,7 @@
 # defaults
 selfupdate=false
 git=git
+name=""
 
 # read user config
 test -f ~/.ysbuilder_conf && source ~/.ysbuilder_conf
@@ -29,6 +30,7 @@ cd "$(dirname "$0")"
 mydir="$(pwd)"
 
 export BUILDER_SELFUPDATE="$selfupdate"
+export BUILDER_NAME="$name"
 ruby "$mydir/client/worker.rb" "$@"
 if $selfupdate; then
   $git fetch
