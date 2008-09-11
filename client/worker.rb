@@ -11,6 +11,8 @@
 #     res = h.getresponse()
 #     return res.status, res.reason, res.read()
 
+$stdout.sync = true
+$stderr.sync = true
 
 require 'net/http'
 require 'uri'
@@ -18,7 +20,7 @@ require 'optparse'
 
 BUILDER_ROOT = File.expand_path(File.dirname(__FILE__))
 Dir.chdir BUILDER_ROOT
-$:.unshift BUILDER_ROOT
+$:.unshift File.join(BUILDER_ROOT, 'lib')
 
 def is_windows?
   RUBY_PLATFORM =~ /(mswin|cygwin|mingw)(32|64)/
@@ -72,12 +74,14 @@ $reloader.record! __FILE__
 class Config
   attr_accessor :server_host, :builder_name
   attr_accessor :poll_interval, :poll_interval_overriden
+  attr_accessor :automatic_updates
 end
 config = Config.new
 config.server_host = "builder.yoursway.com"
 config.builder_name = `hostname`.strip.gsub(/\..*$/, '')
 config.poll_interval = 59 # a default, will be overridden from the server
 config.poll_interval_overriden = false
+config.automatic_updates = false
 
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby worker.rb [options]"
@@ -101,6 +105,7 @@ OptionParser.new do |opts|
 
   opts.on_tail("-U", "Allow self-updating (git fetch, git reset --hard)") do
     # processed by the launcher script, has no effect here
+    config.automatic_updates = true
   end
 
   opts.on_tail("-H", "--help", "Show this message") do
@@ -118,13 +123,11 @@ puts
 puts "=============================================================================="
 puts "YourSway Builder build host"
 puts
-puts "Please verify that the following is correct. Push Ctrl-C to stop this builder."
-puts
 puts "Server:              #{config.server_host}"
 puts "Builder name:        #{config.builder_name}"
-if config.poll_interval_overriden
-puts "Fixed poll interval: #{config.poll_interval} seconds"
-end
+puts "Builder version:     #{ENV['BUILDER_VERSION']}" if ENV['BUILDER_VERSION']
+puts "Fixed poll interval: #{config.poll_interval} seconds" if config.poll_interval_overriden
+puts "Automatic updates:   enabled" if config.automatic_updates
 puts "=============================================================================="
 puts
 
