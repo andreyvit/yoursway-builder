@@ -2,6 +2,7 @@
 
 import os
 import logging
+import urllib
 
 from datetime import datetime, timedelta
 from google.appengine.ext.webapp import template
@@ -163,6 +164,7 @@ class BaseHandler(webapp.RequestHandler):
     self.data.update(projects = self.projects)
     
   def fetch_project(self, project_component):
+    project_component = urllib.unquote(project_component)
     if project_component == 'new':
       self.project = Project()
     else:
@@ -174,12 +176,14 @@ class BaseHandler(webapp.RequestHandler):
     self.data.update(project = self.project)
     
   def fetch_build(self, build_component):
+    build_component = urllib.unquote(build_component)
     self.build = self.project.builds.filter('version =', build_component).order('-created_at').get()
     if self.build == None:
       self.not_found("Build '%s' not found in project '%s'" % (build_component, self.project.name))
     self.data.update(build = self.build)
     
   def fetch_builder(self, builder_component):
+    builder_component = urllib.unquote(builder_component)
     self.builder = Builder.all().filter('name = ', builder_component).get()
     if self.builder == None:
       self.builder = Builder(name = builder_component)
@@ -196,7 +200,7 @@ class BaseHandler(webapp.RequestHandler):
     self.data.update(profiles = self.profiles)
     
   def fetch_profile(self, profile_component):
-    profile_component = profile_component.replace('%40', '@')
+    profile_component = urllib.unquote(profile_component)
     if profile_component == 'new' or profile_component == 'invite':
       self.profile = Profile(level = ANONYMOUS_LEVEL)
     else:
