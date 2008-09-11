@@ -81,7 +81,7 @@ config.server_host = "builder.yoursway.com"
 config.builder_name = `hostname`.strip.gsub(/\..*$/, '')
 config.poll_interval = 59 # a default, will be overridden from the server
 config.poll_interval_overriden = false
-config.automatic_updates = false
+config.automatic_updates = (ENV['BUILDER_SELFUPDATE'] || 'false') == 'true'
 
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby worker.rb [options]"
@@ -105,7 +105,6 @@ OptionParser.new do |opts|
 
   opts.on_tail("-U", "Allow self-updating (git fetch, git reset --hard)") do
     # processed by the launcher script, has no effect here
-    config.automatic_updates = true
   end
 
   opts.on_tail("-H", "--help", "Show this message") do

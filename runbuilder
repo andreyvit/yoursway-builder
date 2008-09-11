@@ -1,14 +1,38 @@
 #! /bin/sh
-allow_selfupdate=false
-test "$1" == "-U" && allow_selfupdate=true
+
+# defaults
+selfupdate=false
+git=git
+
+# read user config
+test -f ~/.ysbuilder_conf && source ~/.ysbuilder_conf
+
+# parse command-line options
+test "$1" == "-U" && selfupdate=true
+
+if $selfupdate && ! $git --version >/dev/null; then
+  echo
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "Could not locate Git. If it is installed, please specify its path in ~/.ysbuilder_conf,"
+  echo "e.g.:"
+  echo "  git=/usr/local/bin/git"
+  echo
+  echo "For your reference, the current value of \$PATH is:"
+  echo "  $PATH"
+  echo
+  echo "Automatic updates will be disabled until you resolve this issue."
+  echo
+  selfupdate=false
+fi
 
 cd "$(dirname "$0")"
 mydir="$(pwd)"
 
+export BUILDER_SELFUPDATE="$selfupdate"
 ruby "$mydir/client/worker.rb" "$@"
-if $allow_selfupdate; then
-  git fetch
-  git stash
-  git reset --hard origin/master
+if $selfupdate; then
+  $git fetch
+  $git stash
+  $git reset --hard origin/master
 fi
 exec "$mydir/$(basename "$0")" "$@"
