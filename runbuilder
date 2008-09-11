@@ -11,12 +11,20 @@ test -f ~/.ysbuilder_conf && source ~/.ysbuilder_conf
 # parse command-line options
 test "$1" == "-U" && selfupdate=true
 
+# apply config file settings
+export BUILDER_SELFUPDATE="$selfupdate"
+export BUILDER_NAME="$name"
+export PATH
+
 if $selfupdate && ! $git --version >/dev/null; then
   echo
-  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-  echo "Could not locate Git. If it is installed, please specify its path in ~/.ysbuilder_conf,"
-  echo "e.g.:"
+  echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+  echo "Could not locate Git. If it is installed, please specify its path"
+  echo "in ~/.ysbuilder_conf, e.g.:"
   echo "  git=/usr/local/bin/git"
+  echo
+  echo "Alternatively, you can explicitly specify the correct PATH, e.g.:"
+  echo "  PATH=/bin:/usr/bin:/usr/local/bin:~/bin"
   echo
   echo "For your reference, the current value of \$PATH is:"
   echo "  $PATH"
@@ -29,8 +37,6 @@ fi
 cd "$(dirname "$0")"
 mydir="$(pwd)"
 
-export BUILDER_SELFUPDATE="$selfupdate"
-export BUILDER_NAME="$name"
 ruby "$mydir/client/worker.rb" "$@"
 if $selfupdate; then
   $git fetch
