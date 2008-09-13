@@ -154,7 +154,7 @@ class Context
     @output_items = {}
   end
   
-  def mark_for_output item
+  def mark_for_output! item
     @output_items[item.name] = true
   end
   
@@ -202,14 +202,15 @@ class Executor
   
   def name_errorneous! name
     @errorneous[name] = true
+    @feedback.info "Name [#{name}] has been marked as errorneous, any further commands mentioning it will be ignored."
   end
   
   def name_errorneous? name
     @errorneous[name] || false
   end
   
-  def new_command command, args, data_lines
-    (@actions[command.upcase] or raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})").new(self, data_lines, args)
+  def new_command command, args, data_lines, lineno
+    (@actions[command.upcase] or raise BuildScriptError, "Unknown command #{command}(#{args.join(', ')})").new(self, data_lines, args, lineno)
   end
   
   def create_report
@@ -333,6 +334,8 @@ class Executor
     return if command.errorneous?
     return unless command.would_execute_on? stage
     begin
+      command.inputs.each { |name| raise ErrorneousRequireError.new(name) if name_errorneous?(name) }
+
       if @references_expansion_enabled
         loop do
           refs = command.collect_refs
@@ -357,9 +360,10 @@ class Executor
         @feedback.info "#{command} postponed until stage #{e.stage}"
       end
     rescue ErrorneousRequireError => e
-      @feedback.info "#{command} ignored because it requires '#{e.name}', but generation of '#{e.name}' has failed"
+      @feedback.error "#{command} ignored because it requires '#{e.name}', but generation of '#{e.name}' has failed"
       command.errorneous! e
     rescue StandardError => e
+      @feedback.error "#{command}: error - #{e}"
       command.errorneous! e
       @build_error ||= e
     end
@@ -382,15 +386,22 @@ class Executor
           item = @items[name] or raise ExecutionError.new("Undefined variable or item [#{ref.name}]")
           next unless item.in_local_store?
           
-          if ref.tagged_with?('alter')
-            command.add_input! ref.name
-          elsif context.marked_for_output? item
-            command.add_input! ref.name
-          else
-            command.add_output! ref.name
+          unless ref.tagged_with?('nodep')
+            name = resolve_alias(ref.name)
+            if ref.tagged_with?('alter')
+              command.add_input! name
+              command.add_output! name
+            elsif context.marked_for_output? item
+              command.add_input! name
+            else
+              context.mark_for_output! item
+              command.add_output! name
+            end
           end
         end
+        command.determine_inputs_and_outputs! self, @feedback
       rescue StandardError => e
+        @feedback.error "#{command}: error determining inputs and outputs - #{e}"
         command.errorneous! e
       end
     end
@@ -476,6 +487,8 @@ class Command
   
   PATTERN = /\[([^\[\]<]+)(?:<([^>]*)>)?\]/
   
+  attr_reader :inputs
+  
   def is_long?; true; end
   
   def self.acts_as_short
@@ -488,10 +501,11 @@ class Command
     [$1.upcase, $1.gsub(/([a-z])([A-Z])/) { |_| "#{$1}-#{$2}" }.upcase]
   end
   
-  def initialize executor, data_lines, args
+  def initialize executor, data_lines, args, lineno
     @executor = executor
     @data_lines = data_lines
     @raw_args = args
+    @lineno = lineno
     @values = {}
     @postpones = {}
     @inputs = []
@@ -499,22 +513,31 @@ class Command
     @errorneous = false
   end
   
+  def determine_inputs_and_outputs! executor, feedback
+  end
+  
   def add_input! name
+    puts "#{self} << input #{name}"
     @inputs << name
   end
   
   def add_output! name
+    puts "#{self} << output #{name}"
     @outputs << name
   end
   
+  def dump_inputs_and_outputs
+    puts "#{self} << #{@inputs.join(',')}"
+    puts "#{self.to_s.gsub(/./, ' ')} >> #{@outputs.join(',')}"
+  end
+  
   def errorneous! error
-    puts "Command #{self} is errorneous"
     @errorneous = true
     @outputs.each { |name| @executor.name_errorneous! name }
   end
   
   def errorneous?
-    @errorneous or @inputs.any? { |name| @executor.name_errorneous?(name) }
+    @errorneous
   end
   
   def collect_refs
@@ -530,7 +553,7 @@ class Command
   end
   
   def to_s
-    command_name
+    "#{command_name}:#{@lineno}"
   end
   
   def would_execute_on? stage
@@ -653,7 +676,7 @@ class SetCommand < Command
   end
   
   def to_s
-    "SET #{@raw_args[0]}"
+    "SET:#{@lineno} #{@raw_args[0]}"
   end
 
   def defined_names
@@ -681,6 +704,9 @@ module InvokeCommands
   
   def do_args! *args
     @args.push *args
+  end
+  
+  def do_dep! *args
   end
 
 end
@@ -879,6 +905,13 @@ end
 
 class PutCommand < Command
   
+  def determine_inputs_and_outputs! executor, feedback
+    @raw_args[1..-1].each do |name|
+      name = executor.resolve_alias(name)
+      add_input! name if item = executor.items[name]
+    end
+  end
+  
   def do_execute! store_name, *item_names
     store = @executor.find_store(store_name)
     item_names.each do |item_name|
@@ -892,6 +925,11 @@ class PutCommand < Command
 end
 
 class SyncCommand < Command
+  
+  def determine_inputs_and_outputs! executor, feedback
+    determine_inputs_and_outputs_for @raw_args[0], executor, 2
+    determine_inputs_and_outputs_for @raw_args[1], executor, 4
+  end
   
   def do_execute! first, second
     @mappings = []
@@ -917,6 +955,15 @@ private
         else raise BuildScriptError, "Invalid action '#{action}' in SYNC command"
         end
       end
+    end
+  end
+  
+  def determine_inputs_and_outputs_for party_name, executor, index
+    party_name = executor.resolve_alias(party_name)
+    puts "#{self} - determine_inputs_and_outputs_for(#{party_name}, executor, #{index})"
+    if item = executor.items[party_name]
+      add_input!  party_name
+      add_output! party_name  if @data_lines.any? { |line| line[0] == 'MAP' && line[index] != 'readonly' }
     end
   end
   
