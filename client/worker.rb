@@ -474,8 +474,10 @@ def process_job feedback, builder_name, message_id, other_lines
     executor = Executor.new(builder_name, feedback)
 
     commands = []
+    lineno = 1
     until other_lines.empty?
       line = other_lines.shift.chomp
+      lineno += 1
       next if line.strip.empty?
       next if line =~ /^\s*#/
   
@@ -493,7 +495,7 @@ def process_job feedback, builder_name, message_id, other_lines
         end
       end
   
-      commands << executor.new_command(command, args, data)
+      commands << executor.new_command(command, args, data, lineno)
     end
 
     process_stage :pure_set,   commands, executor
@@ -508,6 +510,9 @@ def process_job feedback, builder_name, message_id, other_lines
     log_item = executor.define_default_item! :file, 'build.log', "#{prefix}-buildlog.txt", ['log', 'featured'], "#{descr_prefix} Build Log"
     
     executor.determine_inputs_and_outputs! commands
+    
+    # commands.each { |command| command.dump_inputs_and_outputs }
+    # raise Interrupt.new("xxx")
     
     executor.allow_fetching_items!
     feedback.with_target(FileFeedback.new(log_item.fetch_locally(nil))) do
