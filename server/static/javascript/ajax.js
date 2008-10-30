@@ -201,5 +201,5 @@ function log(msg) {
 }
 
 function reload_page() {
-  window.location.href = window.location.href;
+  window.location.reload();
 }
