@@ -1001,7 +1001,7 @@ class ZipCommand < Command
 
     FileUtils.cd tmp_dir do
       case dst_file
-      when /\.zip$/
+      when /\.zip$/, /\.jar$/
         invoke! 'zip', '-r', dst_file, *list_entries(tmp_dir)
       when /\.tar$/
         invoke! 'tar', 'cf', dst_file, *list_entries(tmp_dir)
@@ -1032,7 +1032,7 @@ class UnzipCommand < Command
     FileUtils.mkdir_p tmp_dir
     FileUtils.cd tmp_dir do
       case src_file
-      when /\.zip$/
+      when /\.zip$/, /\.jar$/
         invoke! 'unzip', '-x', src_file
       when /\.tar$/
         invoke! 'tar', 'xf', src_file
