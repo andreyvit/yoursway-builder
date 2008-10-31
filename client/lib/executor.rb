@@ -1102,12 +1102,13 @@ end
 
 class SubstVarsCommand < Command
   
-  def do_execute! file, delimiters='[]'
+  def do_execute! file, delimiters='[]', output = nil
+    output = file if output.nil?
     @additional_variables = {}
     execute_subcommands!
     data = File.read(file)
     data = subst_variables(data, delimiters[0..delimiters.length/2-1], delimiters[delimiters.length/2..-1])
-    File.open(file, 'w') { |f| f.write data}
+    File.open(output, 'w') { |f| f.write data}
   end
   
   def do_set! key, value
