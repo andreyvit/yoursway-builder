@@ -175,7 +175,8 @@ module YourSway
     end
     
     def replace_prefix old_prefix, new_prefix
-      new_prefix + self[old_prefix.length..-1]
+      # XXX when old_prefix == '/' and self == '' the substring expression is returning nil; need a better fix here
+      new_prefix + (self[old_prefix.length..-1] || '')
     end
     
   end

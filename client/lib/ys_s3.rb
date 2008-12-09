@@ -13,6 +13,7 @@ class HttpError < StandardError
     
       alias plain_new new
       def new code
+        code = code.to_i
         case code
         when 500...600 then Http5xxError.plain_new(code)
         else                HttpOtherError.plain_new(code)
