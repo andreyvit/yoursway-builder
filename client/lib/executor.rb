@@ -281,7 +281,7 @@ class Executor
   
   def define_item! item
     name = item.name
-    raise "Duplicate item #{item}" unless @items[name].nil?
+    raise "Duplicate item #{item.name}" unless @items[name].nil?
     @items[name] = item
     @feedback.info "new item defined: [#{item.name}]"
     item
