@@ -453,7 +453,11 @@ private
     end
     return item.fetch_locally(@feedback) if item.is_fetching_very_fast?
     @feedback.action "Fetching item #{item.name}..."
-    item.fetch_locally @feedback
+    begin
+      item.fetch_locally @feedback
+    rescue HttpError => e
+      raise e.class.new("#{e.message} when resolving [#{ref.name}]")
+    end
   end
   
   def resolve_ref ref
